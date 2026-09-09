@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging]
+
+jobs:
+  linux-compatible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore TimeTrackerDesktop.slnx
+      - run: dotnet build TimeTrackerDesktop.slnx -c Release --no-restore --nologo
+      - run: dotnet test TimeTrackerDesktop.slnx -c Release --no-build --nologo
+
+  windows-placeholder:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows WinUI build gate
+        run: Write-Output 'WinUI integration and portable publish are intentionally deferred until the Windows spike is implemented.'

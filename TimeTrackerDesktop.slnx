@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TimeTrackerDesktop.Domain/TimeTrackerDesktop.Domain.csproj" />
+    <Project Path="src/TimeTrackerDesktop.Persistence/TimeTrackerDesktop.Persistence.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TimeTrackerDesktop.Domain.Tests/TimeTrackerDesktop.Domain.Tests.csproj" />
+    <Project Path="tests/TimeTrackerDesktop.Persistence.Tests/TimeTrackerDesktop.Persistence.Tests.csproj" />
+  </Folder>
+</Solution>
