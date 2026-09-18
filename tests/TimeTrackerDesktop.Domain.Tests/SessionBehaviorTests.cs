@@ -119,14 +119,14 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void Starting_again_completes_the_open_entry_at_the_new_clock_time()
+    public void Stop_and_start_completes_the_open_entry_at_the_new_clock_time()
     {
         FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 9, 0, 0);
         SessionService service = new(SessionState.New("demo", clock.Now), clock);
 
         service.StartEntry("first");
         clock.Advance(TimeSpan.FromMinutes(5));
-        service.StartEntry("second");
+        service.RestartEntry("second");
 
         Assert.Equal([1, 2], service.State.Entries.Select(entry => entry.Id));
 
@@ -320,13 +320,13 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void Play_while_active_completes_the_old_entry_and_starts_a_new_one_with_the_supplied_task()
+    public void Stop_and_start_completes_the_old_entry_and_starts_a_new_one_with_the_supplied_task()
     {
         SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(10));
-        SessionResult result = service.StartEntry("code review");
+        SessionResult result = service.RestartEntry("code review");
 
         Assert.Equal(SessionChange.EntryRestarted, result.Change);
         Assert.Equal([1, 2], service.State.Entries.Select(entry => entry.Id));
@@ -344,13 +344,31 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void Play_while_active_with_no_task_supplied_uses_none()
+    public void Start_while_already_tracking_is_a_no_op()
+    {
+        SessionService service = NewIdleService(out FakeClock clock);
+        service.StartEntry("site visit");
+        SessionState before = service.State;
+
+        clock.Advance(TimeSpan.FromMinutes(10));
+        SessionResult result = service.StartEntry("code review");
+
+        // Start is the NOT-tracking operation; switching tasks is Stop and start. A no-op is
+        // recoverable, whereas splitting the running entry would rewrite the user's data.
+        Assert.Equal(SessionChange.None, result.Change);
+        Assert.False(result.Changed);
+        Assert.Equal(before, service.State);
+        Assert.Equal(TimeSpan.FromMinutes(10), clock.Now - service.State.ActiveEntry!.StartTime);
+    }
+
+    [Fact]
+    public void Stop_and_start_with_no_task_supplied_uses_none()
     {
         SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(1));
-        SessionResult result = service.StartEntry();
+        SessionResult result = service.RestartEntry();
 
         Assert.Equal(SessionChange.EntryRestarted, result.Change);
         Assert.Equal(TimeEntry.NoTask, result.ActiveEntry!.Task);
@@ -369,7 +387,7 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void Restart_entry_while_running_matches_play()
+    public void Restart_entry_while_active_reports_a_restart()
     {
         SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
@@ -580,7 +598,7 @@ public sealed class SessionBehaviorTests
         SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult idle = service.StartEntry();
-        SessionResult running = service.StartEntry("site visit");
+        SessionResult running = service.RestartEntry("site visit");
         SessionResult stopped = service.StopCurrentEntry();
 
         // idle -> running: the status cue has a task to show
