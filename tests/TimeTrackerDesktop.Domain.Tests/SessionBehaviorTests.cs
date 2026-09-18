@@ -263,4 +263,304 @@ public sealed class SessionBehaviorTests
         Assert.Equal("site visit", done.Task);
         Assert.Equal(3, done.Id);
     }
+
+    // ================================================================== Task 1.2: transitions
+    // Play uses the exact restart semantics; Stop stops only (plan Task 4.2).
+
+    private static SessionService NewService(out FakeClock clock)
+    {
+        clock = FakeClock.AtCentral(2026, 9, 18, 9, 0, 0);
+        return SessionService.StartNewSession(clock, "demo");
+    }
+
+    [Fact]
+    public void Idle_play_starts_an_entry_with_none_a_blank_description_and_the_clock_time()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        SessionResult result = service.StartEntry();
+
+        Assert.Equal(SessionChange.EntryStarted, result.Change);
+        Assert.True(result.IsActive);
+        Assert.False(result.IsEnded);
+
+        TimeEntry entry = result.ActiveEntry!;
+        Assert.Equal(TimeEntry.NoTask, entry.Task);
+        Assert.Equal(string.Empty, entry.Description);
+        Assert.Equal(clock.Now, entry.StartTime);
+        Assert.Null(entry.EndTime);
+        Assert.Equal(entry, result.AffectedEntry);
+    }
+
+    [Fact]
+    public void Stop_completes_that_exact_entry_at_the_clock_time_and_leaves_the_session_unended_and_idle()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+        TimeEntry running = service.State.ActiveEntry!;
+
+        clock.Advance(TimeSpan.FromMinutes(25));
+        SessionResult result = service.StopCurrentEntry();
+
+        Assert.Equal(SessionChange.EntryStopped, result.Change);
+        Assert.False(result.IsActive);
+        Assert.False(result.IsEnded);
+        Assert.Null(result.ActiveEntry);
+
+        TimeEntry stopped = Assert.Single(service.State.Entries);
+        Assert.Equal(running.Id, stopped.Id);
+        Assert.Equal(running.StartTime, stopped.StartTime);
+        Assert.Equal(running.Task, stopped.Task);
+        Assert.Equal(clock.Now, stopped.EndTime);
+        Assert.True(stopped.IsComplete);
+    }
+
+    [Fact]
+    public void Play_while_active_completes_the_old_entry_and_starts_a_new_one_with_the_supplied_task()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+
+        clock.Advance(TimeSpan.FromMinutes(10));
+        SessionResult result = service.StartEntry("code review");
+
+        Assert.Equal(SessionChange.EntryRestarted, result.Change);
+        Assert.Equal([1, 2], service.State.Entries.Select(entry => entry.Id));
+
+        TimeEntry previous = service.State.Entries[0];
+        Assert.True(previous.IsComplete);
+        Assert.Equal(clock.Now, previous.EndTime);
+        Assert.Equal("site visit", previous.Task);
+
+        TimeEntry current = result.ActiveEntry!;
+        Assert.Equal(2, current.Id);
+        Assert.Equal("code review", current.Task);
+        Assert.Equal(string.Empty, current.Description);
+        Assert.Equal(clock.Now, current.StartTime);
+    }
+
+    [Fact]
+    public void Play_while_active_with_no_task_supplied_uses_none()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        SessionResult result = service.StartEntry();
+
+        Assert.Equal(SessionChange.EntryRestarted, result.Change);
+        Assert.Equal(TimeEntry.NoTask, result.ActiveEntry!.Task);
+    }
+
+    [Fact]
+    public void Restart_entry_from_idle_starts_a_new_entry()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        SessionResult result = service.RestartEntry("site visit");
+
+        Assert.Equal(SessionChange.EntryStarted, result.Change);
+        Assert.Equal(1, result.ActiveEntry!.Id);
+        Assert.Equal("site visit", result.ActiveEntry.Task);
+    }
+
+    [Fact]
+    public void Restart_entry_while_running_matches_play()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+        clock.Advance(TimeSpan.FromMinutes(3));
+
+        SessionResult result = service.RestartEntry("code review");
+
+        Assert.Equal(SessionChange.EntryRestarted, result.Change);
+        Assert.Equal([1, 2], service.State.Entries.Select(entry => entry.Id));
+        Assert.Equal(2, result.ActiveEntry!.Id);
+        Assert.Equal(clock.Now, service.State.Entries[0].EndTime);
+    }
+
+    [Fact]
+    public void End_session_stops_active_work_and_stamps_ended_at()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+
+        clock.Advance(TimeSpan.FromMinutes(40));
+        SessionResult result = service.EndSession();
+
+        Assert.Equal(SessionChange.SessionEnded, result.Change);
+        Assert.True(result.IsEnded);
+        Assert.False(result.IsActive);
+
+        TimeEntry entry = Assert.Single(service.State.Entries);
+        Assert.True(entry.IsComplete);
+        Assert.Equal(clock.Now, entry.EndTime);
+        Assert.Equal(clock.Now, service.State.EndedAt);
+    }
+
+    [Fact]
+    public void End_session_is_idempotent_and_never_moves_ended_at()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+        clock.Advance(TimeSpan.FromMinutes(40));
+
+        SessionResult first = service.EndSession();
+        DateTimeOffset endedAt = service.State.EndedAt!.Value;
+
+        clock.Advance(TimeSpan.FromHours(3));
+        SessionResult second = service.EndSession();
+
+        // TTC restamps EndedAt on a second call; the plan requires idempotency, so we do not.
+        Assert.Equal(SessionChange.None, second.Change);
+        Assert.False(second.Changed);
+        Assert.Equal(endedAt, service.State.EndedAt);
+        Assert.Equal(first.State.Entries, second.State.Entries);
+    }
+
+    [Fact]
+    public void End_session_with_no_work_still_stamps_ended_at()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        SessionResult result = service.EndSession();
+
+        Assert.Equal(SessionChange.SessionEnded, result.Change);
+        Assert.Equal(clock.Now, service.State.EndedAt);
+        Assert.Empty(service.State.Entries);
+    }
+
+    [Fact]
+    public void Stop_is_a_no_op_when_nothing_is_running()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+        service.StopCurrentEntry();
+        SessionState before = service.State;
+
+        SessionResult result = service.StopCurrentEntry();
+
+        Assert.Equal(SessionChange.None, result.Change);
+        Assert.False(result.Changed);
+        Assert.Equal(before, service.State);
+    }
+
+    [Fact]
+    public void Stopping_twice_does_not_move_the_first_end_time()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+
+        clock.Advance(TimeSpan.FromMinutes(5));
+        service.StopCurrentEntry();
+        DateTimeOffset? stoppedAt = Assert.Single(service.State.Entries).EndTime;
+
+        clock.Advance(TimeSpan.FromHours(2));
+        service.StopCurrentEntry();
+
+        Assert.Equal(stoppedAt, Assert.Single(service.State.Entries).EndTime);
+    }
+
+    [Fact]
+    public void Stop_tracking_performs_the_same_transition_as_stop_current_entry()
+    {
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+
+        clock.Advance(TimeSpan.FromMinutes(7));
+        SessionResult result = service.StopTracking();
+
+        Assert.Equal(SessionChange.EntryStopped, result.Change);
+        Assert.False(service.State.IsActive);
+        Assert.Equal(clock.Now, Assert.Single(service.State.Entries).EndTime);
+    }
+
+    [Fact]
+    public void Stop_tracking_is_a_no_op_when_nothing_is_running()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        SessionResult result = service.StopTracking();
+
+        Assert.Equal(SessionChange.None, result.Change);
+        Assert.Empty(service.State.Entries);
+    }
+
+    [Fact]
+    public void Play_reopens_an_ended_session()
+    {
+        // TTC: "resuming means the session is active again" - Resume sets EndedAt back to null
+        SessionService service = NewService(out FakeClock clock);
+        service.StartEntry("site visit");
+        service.EndSession();
+
+        clock.Advance(TimeSpan.FromMinutes(15));
+        SessionResult result = service.StartEntry("code review");
+
+        Assert.Equal(SessionChange.EntryStarted, result.Change);
+        Assert.False(result.IsEnded);
+        Assert.Null(service.State.EndedAt);
+        Assert.Equal(2, result.ActiveEntry!.Id);
+    }
+
+    [Fact]
+    public void Entry_ids_keep_incrementing_across_repeated_restarts()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        service.StartEntry("a");
+        service.RestartEntry("b");
+        service.RestartEntry("c");
+        service.StopCurrentEntry();
+
+        Assert.Equal([1, 2, 3], service.State.Entries.Select(entry => entry.Id));
+        Assert.Equal(4, service.State.NextEntryId);
+    }
+
+    [Fact]
+    public void Start_new_session_generates_its_name_from_the_clock_and_starts_idle()
+    {
+        FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 16, 45, 30);
+
+        SessionService service = SessionService.StartNewSession(clock);
+
+        Assert.Equal("Session 2026-09-18 16:45:30", service.State.Name);
+        Assert.Equal(clock.Now, service.State.StartedAt);
+        Assert.False(service.State.IsActive);
+        Assert.Null(service.State.EndedAt);
+        Assert.Empty(service.State.Entries);
+    }
+
+    [Fact]
+    public void Start_new_session_keeps_a_supplied_name()
+    {
+        FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 16, 45, 30);
+
+        SessionService service = SessionService.StartNewSession(clock, "site review");
+
+        Assert.Equal("site review", service.State.Name);
+    }
+
+    [Fact]
+    public void Result_exposes_the_cues_a_status_display_needs()
+    {
+        SessionService service = NewService(out FakeClock clock);
+
+        SessionResult idle = service.StartEntry();
+        SessionResult running = service.StartEntry("site visit");
+        SessionResult stopped = service.StopCurrentEntry();
+
+        // idle -> running: the status cue has a task to show
+        Assert.True(idle.IsActive);
+        Assert.Equal(TimeEntry.NoTask, idle.ActiveEntry!.Task);
+
+        // restarting keeps a task to show and a new start time to render
+        Assert.Equal("site visit", running.ActiveEntry!.Task);
+        Assert.Equal(clock.Now, running.ActiveEntry.StartTime);
+
+        // stopped: no active entry, so the status cue falls back to the idle text
+        Assert.False(stopped.IsActive);
+        Assert.Null(stopped.ActiveEntry);
+        Assert.NotNull(stopped.AffectedEntry);
+    }
 }
