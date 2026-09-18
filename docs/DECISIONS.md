@@ -41,3 +41,41 @@ VS Community 2026) before being pinned. Nothing here was guessed.
   oversight: the Linux CI job builds and tests only the non-UI projects, and app/view-model tests
   run on Windows CI (plan Task 7.1).
 
+## Task 1.1 — domain models and injectable clock (2026-09-18)
+
+The Phase 0 bootstrap had every domain type in a single `Models.cs`. It is now split into the layout
+the plan specifies (`Models/`, `Services/`), and the rules that were implicit in it are explicit.
+
+- **Nullable `EndTime`, never `DateTime.MinValue`.** "Still running" is represented by `null` rather
+  than a sentinel, so an open entry cannot leak `MinValue` into a duration or a total. `Duration` is
+  `TimeSpan?` and is `null` while open, for the same reason: a zero-length interval would be a wrong
+  answer, not a missing one. This also matches what TTC actually writes — `endTime` is `null` unless
+  the entry is complete (see `docs/JSON-COMPATIBILITY.md`).
+- **`NextEntryId` is `max(existing Id) + 1`, not the entry count.** Ids are keys and v1's hard delete
+  left real gaps, so counting entries would re-mint an id that is already in the file. Soft-deleted
+  entries keep their id, so their slots are never reused. This is exactly TTC's resume rule
+  (`ReseedId(maxId + 1)`), including its limit: an id that was hard-deleted off the end of a v1 file
+  can be minted again, because the file itself carries no record that it ever existed.
+- **Folders organise, the namespace stays flat.** Every domain type is in `TimeTrackerDesktop.Domain`
+  regardless of `Models/` or `Services/`. The bootstrap was flat, TTC is flat, and sub-namespaces
+  would add `using` noise to every consumer for no encapsulation benefit at this size.
+- **Session names follow TTC's rule, with one deliberate deviation.** A blank name is generated as
+  `Session yyyy-MM-dd HH:mm:ss`; the timestamp is formatted with the **invariant culture**, whereas
+  TTC uses the current culture. A session's name feeds its file name, so a locale-dependent name
+  would move where a session is written for no user-visible gain. The format string keeps "Session"
+  *outside* the pattern on purpose: `s` is a reserved format character (seconds), so
+  `"Session yyyy-…"` as a single pattern would render the seconds value in place of the word.
+- **A whitespace-only name is kept, not replaced.** TTC tests `IsNullOrEmpty`, not
+  `IsNullOrWhiteSpace`. Preserved deliberately — "tidying" it here would change the file a session
+  produces.
+- **`SystemClock` returns a local offset and must never return `UtcNow`.** TTC stamps local time and
+  persists the offset in every timestamp it writes, so the offset is data. `IClock` documents this
+  so a future implementation cannot quietly break it.
+- **`FakeClock` lives in the test project, not the domain.** The domain only needs the `IClock`
+  interface; a deterministic clock is a test concern, and keeping it in tests means no fake ships in
+  the domain assembly.
+- **`SessionService` was relocated, not redesigned.** Task 1.1 moves it out of the bootstrap file and
+  onto the immutable model API while keeping its transitions byte-for-byte equivalent, so the move is
+  verifiable on its own. Task 1.2 implements the real transitions (`StartNewSession`, `StartEntry`,
+  `StopCurrentEntry`, `RestartEntry`, `StopTracking`, `EndSession`) and their immutable results.
+
