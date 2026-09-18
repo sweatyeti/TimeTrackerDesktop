@@ -267,16 +267,20 @@ public sealed class SessionBehaviorTests
     // ================================================================== Task 1.2: transitions
     // Play uses the exact restart semantics; Stop stops only (plan Task 4.2).
 
-    private static SessionService NewService(out FakeClock clock)
+    /// <summary>
+    /// An <b>idle</b> session with no entries. StartNewSession auto-starts an entry (TTC's CLI `new`
+    /// behaviour), so a test that needs the idle state builds the session directly.
+    /// </summary>
+    private static SessionService NewIdleService(out FakeClock clock)
     {
         clock = FakeClock.AtCentral(2026, 9, 18, 9, 0, 0);
-        return SessionService.StartNewSession(clock, "demo");
+        return new SessionService(SessionState.New("demo", clock.Now), clock);
     }
 
     [Fact]
     public void Idle_play_starts_an_entry_with_none_a_blank_description_and_the_clock_time()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult result = service.StartEntry();
 
@@ -295,7 +299,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Stop_completes_that_exact_entry_at_the_clock_time_and_leaves_the_session_unended_and_idle()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
         TimeEntry running = service.State.ActiveEntry!;
 
@@ -318,7 +322,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Play_while_active_completes_the_old_entry_and_starts_a_new_one_with_the_supplied_task()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(10));
@@ -342,7 +346,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Play_while_active_with_no_task_supplied_uses_none()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(1));
@@ -355,7 +359,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Restart_entry_from_idle_starts_a_new_entry()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult result = service.RestartEntry("site visit");
 
@@ -367,7 +371,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Restart_entry_while_running_matches_play()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
         clock.Advance(TimeSpan.FromMinutes(3));
 
@@ -382,7 +386,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void End_session_stops_active_work_and_stamps_ended_at()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(40));
@@ -399,29 +403,34 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void End_session_is_idempotent_and_never_moves_ended_at()
+    public void End_session_restamps_ended_at_on_every_call_matching_ttc()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
         clock.Advance(TimeSpan.FromMinutes(40));
 
         SessionResult first = service.EndSession();
-        DateTimeOffset endedAt = service.State.EndedAt!.Value;
+        DateTimeOffset firstEnd = service.State.EndedAt!.Value;
+        Assert.Equal(clock.Now, firstEnd);
+        Assert.NotNull(first.AffectedEntry);
 
         clock.Advance(TimeSpan.FromHours(3));
         SessionResult second = service.EndSession();
 
-        // TTC restamps EndedAt on a second call; the plan requires idempotency, so we do not.
-        Assert.Equal(SessionChange.None, second.Change);
-        Assert.False(second.Changed);
-        Assert.Equal(endedAt, service.State.EndedAt);
+        // TTC parity (decided): every call restamps EndedAt, so a repeat End rewrites when the
+        // session ended. The entries are untouched, because nothing was running on the second call.
+        Assert.Equal(SessionChange.SessionEnded, second.Change);
+        Assert.True(second.Changed);
+        Assert.Equal(clock.Now, service.State.EndedAt);
+        Assert.NotEqual(firstEnd, service.State.EndedAt);
         Assert.Equal(first.State.Entries, second.State.Entries);
+        Assert.Null(second.AffectedEntry);
     }
 
     [Fact]
     public void End_session_with_no_work_still_stamps_ended_at()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult result = service.EndSession();
 
@@ -433,7 +442,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Stop_is_a_no_op_when_nothing_is_running()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
         service.StopCurrentEntry();
         SessionState before = service.State;
@@ -448,7 +457,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Stopping_twice_does_not_move_the_first_end_time()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(5));
@@ -464,7 +473,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Stop_tracking_performs_the_same_transition_as_stop_current_entry()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
 
         clock.Advance(TimeSpan.FromMinutes(7));
@@ -478,7 +487,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Stop_tracking_is_a_no_op_when_nothing_is_running()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult result = service.StopTracking();
 
@@ -490,7 +499,7 @@ public sealed class SessionBehaviorTests
     public void Play_reopens_an_ended_session()
     {
         // TTC: "resuming means the session is active again" - Resume sets EndedAt back to null
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
         service.StartEntry("site visit");
         service.EndSession();
 
@@ -506,7 +515,7 @@ public sealed class SessionBehaviorTests
     [Fact]
     public void Entry_ids_keep_incrementing_across_repeated_restarts()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         service.StartEntry("a");
         service.RestartEntry("b");
@@ -518,7 +527,7 @@ public sealed class SessionBehaviorTests
     }
 
     [Fact]
-    public void Start_new_session_generates_its_name_from_the_clock_and_starts_idle()
+    public void Start_new_session_generates_its_name_and_starts_tracking_immediately()
     {
         FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 16, 45, 30);
 
@@ -526,25 +535,49 @@ public sealed class SessionBehaviorTests
 
         Assert.Equal("Session 2026-09-18 16:45:30", service.State.Name);
         Assert.Equal(clock.Now, service.State.StartedAt);
-        Assert.False(service.State.IsActive);
         Assert.Null(service.State.EndedAt);
-        Assert.Empty(service.State.Entries);
+
+        // TTC's CLI `new` opens an entry immediately, stamped BEFORE it prompts for a task
+        TimeEntry entry = Assert.Single(service.State.Entries);
+        Assert.Equal(1, entry.Id);
+        Assert.Equal(TimeEntry.NoTask, entry.Task);
+        Assert.Equal(string.Empty, entry.Description);
+        Assert.Equal(clock.Now, entry.StartTime);
+        Assert.True(service.State.IsActive);
     }
 
     [Fact]
-    public void Start_new_session_keeps_a_supplied_name()
+    public void Start_new_session_keeps_a_supplied_name_and_still_starts_tracking()
     {
         FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 16, 45, 30);
 
         SessionService service = SessionService.StartNewSession(clock, "site review");
 
         Assert.Equal("site review", service.State.Name);
+        Assert.Single(service.State.Entries);
+        Assert.True(service.State.IsActive);
+    }
+
+    [Fact]
+    public void Applying_the_prompted_task_keeps_the_stamp_taken_before_the_prompt()
+    {
+        FakeClock clock = FakeClock.AtCentral(2026, 9, 18, 16, 45, 30);
+        SessionService service = SessionService.StartNewSession(clock);
+        DateTimeOffset stamped = service.State.ActiveEntry!.StartTime;
+
+        // the UI's task prompt happens here, which is why the stamp is taken first
+        clock.Advance(TimeSpan.FromSeconds(20));
+        service.UpdateTask("site visit");
+
+        TimeEntry entry = Assert.Single(service.State.Entries);
+        Assert.Equal("site visit", entry.Task);
+        Assert.Equal(stamped, entry.StartTime);
     }
 
     [Fact]
     public void Result_exposes_the_cues_a_status_display_needs()
     {
-        SessionService service = NewService(out FakeClock clock);
+        SessionService service = NewIdleService(out FakeClock clock);
 
         SessionResult idle = service.StartEntry();
         SessionResult running = service.StartEntry("site visit");

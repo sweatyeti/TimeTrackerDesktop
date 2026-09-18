@@ -90,14 +90,22 @@ Implements invariants 2–5 of the plan as explicit operations that return an im
   exist because the widget's Play and the tray's "Start new task" are separate command surfaces.
 - **`StopTracking` is `StopCurrentEntry`.** TTC's "Stop tracking" (`StopSession(exit: false)`) is
   literally `StopCurrentEntry()`, so the command-surface name delegates rather than reimplementing.
-- **`EndSession` is idempotent.** A second call is a no-op that leaves `EndedAt` untouched. **TTC
-  restamps `EndedAt` on a second call**, which silently rewrites when a session ended; the plan asks
-  for idempotency, so we deviate deliberately.
+- **`EndSession` restamps `EndedAt` on every call (TTC parity — user decision, 2026-09-18).** A repeat
+  call rewrites when the session ended, so a caller that must not move it has to check
+  `SessionResult.IsEnded` first. <!-- Superseded 2026-09-18. Originally: "**`EndSession` is
+  idempotent.** A second call is a no-op that leaves `EndedAt` untouched. **TTC restamps `EndedAt` on
+  a second call**, which silently rewrites when a session ended; the plan asks for idempotency, so we
+  deviate deliberately." The user chose TTC parity over protecting the original end time. -->
 - **Stop is a no-op when nothing is running**, so a double Stop cannot move a recorded end time.
-- **A new session starts idle.** TTC's CLI `new` opens an entry immediately because it prompts for a
-  task up front, but the widget has a real idle state ("No task running", Play available, Stop
-  unavailable) and the plan requires a session with no active entry to stay idle. A caller wanting
-  TTC's behaviour calls `StartEntry` straight after `StartNewSession`.
+- **A new session starts tracking immediately (TTC parity — user decision, 2026-09-18).**
+  `StartNewSession` opens an entry stamped at the current time with the `none` task; the caller then
+  prompts for a task and applies it with `UpdateTask`, which leaves the original stamp intact. TTC
+  stamps *before* showing its prompt, so the time spent answering the prompt is tracked rather than
+  lost. <!-- Superseded 2026-09-18. Originally: "**A new session starts idle.** TTC's CLI `new` opens
+  an entry immediately because it prompts for a task up front, but the widget has a real idle state
+  ('No task running', Play available, Stop unavailable) and the plan requires a session with no active
+  entry to stay idle. A caller wanting TTC's behaviour calls `StartEntry` straight after." The user
+  chose TTC's CLI behaviour. -->
 - **Opening an entry reopens an ended session** (`EndedAt` back to `null`). This follows TTC's own
   `Resume`, whose comment is "resuming means the session is active again".
 - **`SessionResult`/`SessionChange` are the status-cue contract.** Each operation returns the new
@@ -106,4 +114,23 @@ Implements invariants 2–5 of the plan as explicit operations that return an im
   no-op because nothing was touched.
 - **`UpdateTask`, `UpdateDescription`, `Delete` and `Restore` stay `void` for now.** Their result
   contracts belong to Task 1.3 (editing rules); giving them a shape here would pre-empt that design.
+
+## User decisions on pending behaviour (2026-09-18)
+
+The user was asked to settle the behaviour forks this work had been deciding unilaterally. Answered
+so far:
+
+1. **New session start state — start tracking immediately** (TTC's CLI `new`), prompting for a task up
+   front. Implemented: `StartNewSession` opens an entry at the current time; the caller prompts and
+   applies the task via `UpdateTask`.
+2. **Generated session name locale — invariant culture.** Keeps a session's name, and therefore its
+   file name, from shifting with the machine locale. Unchanged from the first implementation.
+3. **Ending a session twice — match TTC and restamp `EndedAt`.** Reverses the original idempotent
+   implementation.
+
+Still open (asked one at a time, not yet answered): the duplicate command names
+(`StartEntry`/`RestartEntry`, `StopCurrentEntry`/`StopTracking`), whether a whitespace-only session
+name stays verbatim, `PublishTrimmed=false`, repository visibility (the plan says private, the repo is
+public), how to reconcile `main`'s unrelated history at promotion, the `github-legacy` skill still in
+the Telegram index, and the leftover VM scratch directory.
 

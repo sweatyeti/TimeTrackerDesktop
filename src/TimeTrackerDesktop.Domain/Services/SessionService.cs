@@ -27,20 +27,24 @@ public sealed class SessionService
     }
 
     /// <summary>
-    /// Starts a brand new session: fresh identity, name generated from the clock when blank, no
-    /// entries, not ended.
+    /// Starts a brand new session: fresh identity, name generated from the clock when blank, and an
+    /// entry already tracking.
     ///
-    /// The new session starts <b>idle</b>, not tracking. TTC's CLI <c>new</c> opens an entry
-    /// immediately because it prompts for a task up front, but the widget has a real idle state
-    /// ("No task running", Play available, Stop unavailable), and the plan requires a session with no
-    /// active entry to stay idle. A caller that wants TTC's behaviour calls <see cref="StartEntry"/>
+    /// <b>Tracking starts immediately, matching TTC's CLI <c>new</c>.</b> The entry is stamped at the
+    /// current time and opens with the "none" task; the caller then prompts for a task and applies it
+    /// with <see cref="UpdateTask"/>. That ordering is deliberate and is what TTC does — it stamps the
+    /// start time <i>before</i> showing its task prompt, so time spent answering the prompt is tracked
+    /// rather than lost. A caller that wants an idle session calls <see cref="StopCurrentEntry"/>
     /// straight after.
     /// </summary>
     public static SessionService StartNewSession(IClock clock, string? name = null)
     {
         ArgumentNullException.ThrowIfNull(clock);
 
-        return new SessionService(SessionState.New(name, clock.Now), clock);
+        SessionService session = new(SessionState.New(name, clock.Now), clock);
+        session.StartEntry();
+
+        return session;
     }
 
     /// <summary>
@@ -86,17 +90,13 @@ public sealed class SessionService
     /// <summary>
     /// Ends the session: stops any active entry, then stamps <c>EndedAt</c> (invariant 5).
     ///
-    /// <b>Idempotent.</b> A second call is a no-op and does not move <c>EndedAt</c>, so a repeat
-    /// command (a double-clicked Exit, a retried tray action) cannot rewrite when the session ended.
-    /// TTC restamps it, which silently corrupts the record of when work stopped.
+    /// <b>Not idempotent — this matches TTC.</b> Every call restamps <c>EndedAt</c> with the current
+    /// time, so calling it twice rewrites when the session ended. TTC behaves the same way, and TTC
+    /// parity was chosen deliberately over protecting the original end time; a caller that must not
+    /// move it should check <see cref="SessionResult.IsEnded"/> first.
     /// </summary>
     public SessionResult EndSession()
     {
-        if(State.EndedAt is not null)
-        {
-            return new SessionResult(State, SessionChange.None);
-        }
-
         // capture the stopped entry before stamping, so the caller can still show what just stopped
         SessionResult stopped = StopCurrentEntry();
         State = State with { EndedAt = _clock.Now };
