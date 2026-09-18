@@ -27,13 +27,15 @@ public sealed record SessionState(
         new(Guid.NewGuid(), ResolveName(name, startedAt), startedAt, EndedAt: null, Entries: []);
 
     /// <summary>
-    /// A blank name is generated from <paramref name="at"/>; anything else is kept verbatim —
-    /// including a whitespace-only name, because TTC tests with <c>IsNullOrEmpty</c> rather than
-    /// <c>IsNullOrWhiteSpace</c>. Deviation: the timestamp is formatted with the invariant culture
-    /// (TTC uses the current culture), so a session's name does not change with the machine locale.
+    /// A blank name is generated from <paramref name="at"/>; anything else is kept verbatim.
+    ///
+    /// Two deliberate deviations from TTC (user decisions, 2026-09-18): a **whitespace-only name
+    /// counts as blank** rather than being kept — TTC tests <c>IsNullOrEmpty</c>, and a name of only
+    /// spaces slugs to <c>---.json</c> — and the timestamp is formatted with the **invariant culture**,
+    /// so a session's name cannot shift with the machine locale.
     /// </summary>
     public static string ResolveName(string? name, DateTimeOffset at) =>
-        string.IsNullOrEmpty(name)
+        string.IsNullOrWhiteSpace(name)
             ? "Session " + at.ToString(NameTimestampFormat, CultureInfo.InvariantCulture)
             : name;
 

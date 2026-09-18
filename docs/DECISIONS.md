@@ -65,9 +65,12 @@ the plan specifies (`Models/`, `Services/`), and the rules that were implicit in
   would move where a session is written for no user-visible gain. The format string keeps "Session"
   *outside* the pattern on purpose: `s` is a reserved format character (seconds), so
   `"Session yyyy-…"` as a single pattern would render the seconds value in place of the word.
-- **A whitespace-only name is kept, not replaced.** TTC tests `IsNullOrEmpty`, not
-  `IsNullOrWhiteSpace`. Preserved deliberately — "tidying" it here would change the file a session
-  produces.
+- **A whitespace-only name counts as blank and is generated (user decision, 2026-09-18).** A name of
+  only spaces slugs to `---.json`, so it is treated as blank instead of being kept.
+  <!-- Superseded 2026-09-18. Originally: "**A whitespace-only name is kept, not replaced.** TTC tests
+  `IsNullOrEmpty`, not `IsNullOrWhiteSpace`. Preserved deliberately — 'tidying' it here would change
+  the file a session produces." The user chose the tidier behaviour after seeing that the file name
+  becomes `---.json`. -->
 - **`SystemClock` returns a local offset and must never return `UtcNow`.** TTC stamps local time and
   persists the offset in every timestamp it writes, so the offset is data. `IClock` documents this
   so a future implementation cannot quietly break it.
@@ -150,10 +153,10 @@ so far:
    `StopCurrentEntry`/`StopTracking` and `EndSession` — with confirmation, flushing and exiting left to
    the caller. This reverses the original "Play and Restart are one transition" implementation, and it
    means the widget's Play button must dispatch on state rather than always calling `StartEntry`.
+5. **A whitespace-only session name counts as blank and is generated.** Deviates from TTC's
+   `IsNullOrEmpty` test, because a name of only spaces slugs to `---.json`.
 
-Still open (asked one at a time, not yet answered): the duplicate command names
-(`StartEntry`/`RestartEntry`, `StopCurrentEntry`/`StopTracking`), whether a whitespace-only session
-name stays verbatim, `PublishTrimmed=false`, repository visibility (the plan says private, the repo is
-public), how to reconcile `main`'s unrelated history at promotion, the `github-legacy` skill still in
-the Telegram index, and the leftover VM scratch directory.
+Still open (asked one at a time, not yet answered): `PublishTrimmed=false`, repository visibility (the
+plan says private, the repo is public), how to reconcile `main`'s unrelated history at promotion, the
+`github-legacy` skill still in the Telegram index, and the leftover VM scratch directory.
 
