@@ -79,3 +79,31 @@ the plan specifies (`Models/`, `Services/`), and the rules that were implicit in
   verifiable on its own. Task 1.2 implements the real transitions (`StartNewSession`, `StartEntry`,
   `StopCurrentEntry`, `RestartEntry`, `StopTracking`, `EndSession`) and their immutable results.
 
+## Task 1.2 — Play, Stop and end-session transitions (2026-09-18)
+
+Implements invariants 2–5 of the plan as explicit operations that return an immutable result.
+
+- **Play and Restart are one transition, not two.** The plan states Play "uses the exact restart
+  semantics", so `StartEntry` and `RestartEntry` both call a single private `OpenEntry`: complete
+  whatever is running, then open a new entry and report `EntryStarted` or `EntryRestarted` according
+  to what actually happened. Two implementations of one transition eventually disagree; the two names
+  exist because the widget's Play and the tray's "Start new task" are separate command surfaces.
+- **`StopTracking` is `StopCurrentEntry`.** TTC's "Stop tracking" (`StopSession(exit: false)`) is
+  literally `StopCurrentEntry()`, so the command-surface name delegates rather than reimplementing.
+- **`EndSession` is idempotent.** A second call is a no-op that leaves `EndedAt` untouched. **TTC
+  restamps `EndedAt` on a second call**, which silently rewrites when a session ended; the plan asks
+  for idempotency, so we deviate deliberately.
+- **Stop is a no-op when nothing is running**, so a double Stop cannot move a recorded end time.
+- **A new session starts idle.** TTC's CLI `new` opens an entry immediately because it prompts for a
+  task up front, but the widget has a real idle state ("No task running", Play available, Stop
+  unavailable) and the plan requires a session with no active entry to stay idle. A caller wanting
+  TTC's behaviour calls `StartEntry` straight after `StartNewSession`.
+- **Opening an entry reopens an ended session** (`EndedAt` back to `null`). This follows TTC's own
+  `Resume`, whose comment is "resuming means the session is active again".
+- **`SessionResult`/`SessionChange` are the status-cue contract.** Each operation returns the new
+  state, what changed, and the entry it touched, so a view model can update the tray icon, the
+  ACTIVE/NOT ACTIVE banner and the tooltip without diffing two states. `AffectedEntry` is `null` for a
+  no-op because nothing was touched.
+- **`UpdateTask`, `UpdateDescription`, `Delete` and `Restore` stay `void` for now.** Their result
+  contracts belong to Task 1.3 (editing rules); giving them a shape here would pre-empt that design.
+
