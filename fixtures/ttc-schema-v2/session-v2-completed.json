@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "sessionId": "490df8b1-4e72-4980-9769-d215867bea3e",
+  "name": "Session 2026-09-18 14:05:00",
+  "startedAt": "2026-09-18T14:39:45.9918525-05:00",
+  "endedAt": "2026-09-18T14:40:14.189536-05:00",
+  "entries": [
+    {
+      "id": 1,
+      "startTime": "2026-09-18T14:39:46.0147649-05:00",
+      "endTime": "2026-09-18T14:40:02.9834323-05:00",
+      "task": "site visit",
+      "description": "",
+      "logged": false,
+      "isComplete": true,
+      "isDeleted": false
+    },
+    {
+      "id": 2,
+      "startTime": "2026-09-18T14:40:02.9837487-05:00",
+      "endTime": "2026-09-18T14:40:14.1895266-05:00",
+      "task": "code review",
+      "description": "",
+      "logged": false,
+      "isComplete": true,
+      "isDeleted": false
+    }
+  ]
+}

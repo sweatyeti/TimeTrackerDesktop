@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "sessionId": "ab24ca65-efc2-4b47-a7f0-ecc776d46f48",
+  "name": "a:b*c?d\u003Ce\u003Ef|g/h\\i",
+  "startedAt": "2026-09-18T14:41:59.8009385-05:00",
+  "endedAt": "2026-09-18T14:42:20.8919369-05:00",
+  "entries": [
+    {
+      "id": 1,
+      "startTime": "2026-09-18T14:41:59.8231103-05:00",
+      "endTime": "2026-09-18T14:42:20.8913956-05:00",
+      "task": "site visit",
+      "description": "",
+      "logged": false,
+      "isComplete": true,
+      "isDeleted": false
+    }
+  ]
+}
