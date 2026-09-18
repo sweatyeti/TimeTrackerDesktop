@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "f5eaaaf3-7ce1-4ad2-a1c4-4ed113aad2a9",
+  "name": "Session 2026-09-18 15:10:00",
+  "startedAt": "2026-09-18T14:40:36.7303139-05:00",
+  "endedAt": "2026-09-18T14:41:10.9487714-05:00",
+  "entries": [
+    {
+      "id": 1,
+      "startTime": "2026-09-18T14:40:36.7532729-05:00",
+      "endTime": "2026-09-18T14:40:53.6976663-05:00",
+      "task": "site visit",
+      "description": "",
+      "logged": false,
+      "isComplete": true
+    },
+    {
+      "id": 2,
+      "startTime": "2026-09-18T14:40:53.6977756-05:00",
+      "endTime": "2026-09-18T14:41:00.7680566-05:00",
+      "task": "code review",
+      "description": "",
+      "logged": false,
+      "isComplete": true
+    },
+    {
+      "id": 3,
+      "startTime": "2026-09-18T14:41:00.768081-05:00",
+      "endTime": "2026-09-18T14:41:10.9487576-05:00",
+      "task": "gamma",
+      "description": "",
+      "logged": false,
+      "isComplete": true
+    }
+  ]
+}

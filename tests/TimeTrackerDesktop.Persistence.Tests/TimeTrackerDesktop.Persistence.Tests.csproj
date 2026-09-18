@@ -23,4 +23,12 @@
     <ProjectReference Include="..\..\src\TimeTrackerDesktop.Domain\TimeTrackerDesktop.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Compatibility fixtures (plan Task 0.3): copied to the test output so the tests read the exact
+         bytes TimeTrackerConsole emitted. Linked flat because the tests address them by file name. -->
+    <None Include="..\..\fixtures\**\*.json"
+          Link="fixtures\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
