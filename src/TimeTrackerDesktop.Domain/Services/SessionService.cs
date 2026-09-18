@@ -48,18 +48,27 @@ public sealed class SessionService
     }
 
     /// <summary>
-    /// Play. Idle opens an entry with the supplied task (blank becomes "none") and a blank
-    /// description; already running completes the current entry and opens a new one. Invariants 2 and 3.
+    /// <b>Start</b> — the operation for when time is <b>not</b> being tracked: opens an entry with the
+    /// supplied task (blank becomes "none") and a blank description, stamped at the current time.
+    ///
+    /// <b>Already tracking is a no-op</b>, reported as <see cref="SessionChange.None"/>. Start is not
+    /// the operation for switching tasks — that is <see cref="RestartEntry"/> ("stop and start"). A
+    /// no-op is deliberate: if a stale command arrives while an entry is running, silently splitting
+    /// that entry would rewrite the user's data, whereas doing nothing is recoverable.
     /// </summary>
-    public SessionResult StartEntry(string? task = null) => OpenEntry(task);
+    public SessionResult StartEntry(string? task = null) =>
+        State.IsActive ? new SessionResult(State, SessionChange.None) : OpenEntry(task);
 
     /// <summary>
-    /// The restart transition on its own, for command surfaces that always mean "switch to a new
-    /// task" — the tray's Start new task, and the widget's secondary "start new task" control.
+    /// <b>Stop and start</b> — the operation for when a task <b>is</b> active: completes the running
+    /// entry and immediately opens a new one with the supplied task (blank becomes "none") and a blank
+    /// description.
     ///
-    /// Deliberately the same transition as <see cref="StartEntry"/>: the plan states that Play "uses
-    /// the exact restart semantics", so one implementation serves both and the two command surfaces
-    /// cannot drift apart.
+    /// Also starts an entry when nothing is running, because the command surfaces that always mean
+    /// "switch to a new task" (the widget's start-new-task control, the tray's Start new task) must
+    /// work from the idle state too. The reported change distinguishes the two cases:
+    /// <see cref="SessionChange.EntryRestarted"/> when something was running,
+    /// <see cref="SessionChange.EntryStarted"/> when nothing was.
     /// </summary>
     public SessionResult RestartEntry(string? task = null) => OpenEntry(task);
 

@@ -83,11 +83,28 @@ the plan specifies (`Models/`, `Services/`), and the rules that were implicit in
 
 Implements invariants 2–5 of the plan as explicit operations that return an immutable result.
 
-- **Play and Restart are one transition, not two.** The plan states Play "uses the exact restart
-  semantics", so `StartEntry` and `RestartEntry` both call a single private `OpenEntry`: complete
-  whatever is running, then open a new entry and report `EntryStarted` or `EntryRestarted` according
-  to what actually happened. Two implementations of one transition eventually disagree; the two names
-  exist because the widget's Play and the tray's "Start new task" are separate command surfaces.
+- **The four tracking operations have distinct contracts (user decision, 2026-09-18).**
+  - **Start** (`StartEntry`) — the operation for when time is *not* tracked. Calling it while already
+    tracking is a **no-op** (`SessionChange.None`): splitting a running entry because a stale command
+    arrived would rewrite the user's data, whereas doing nothing is recoverable.
+  - **Stop and start** (`RestartEntry`) — the operation for when a task *is* active: completes the
+    running entry and opens a new one. It also starts when idle, because the command surfaces that
+    mean "switch to a new task" (the widget's start-new-task control, the tray's Start new task) must
+    work from idle; the reported change distinguishes `EntryRestarted` from `EntryStarted`.
+  - **Stop** (`StopCurrentEntry`, and `StopTracking` as its command-surface name) — stops and does
+    **not** start a new task. A no-op when nothing is running, so a double Stop cannot move an end time.
+  - **Stop and exit** (`EndSession`) — stops any active work, then stamps `EndedAt`. Confirming,
+    flushing and exiting belong to the caller, not the domain.
+  <!-- Superseded 2026-09-18. Originally: "**Play and Restart are one transition, not two.** The plan
+  states Play 'uses the exact restart semantics', so `StartEntry` and `RestartEntry` both call a
+  single private `OpenEntry`: complete whatever is running, then open a new entry and report
+  `EntryStarted` or `EntryRestarted` according to what actually happened. Two implementations of one
+  transition eventually disagree; the two names exist because the widget's Play and the tray's 'Start
+  new task' are separate command surfaces." The user instead specified four operations with distinct
+  conditions. -->
+- **The widget's Play has to dispatch**: idle calls Start, active calls Stop and start. The plan's
+  "Play uses the exact restart semantics" is satisfied by that dispatch, not by Start silently
+  restarting behind the caller's back.
 - **`StopTracking` is `StopCurrentEntry`.** TTC's "Stop tracking" (`StopSession(exit: false)`) is
   literally `StopCurrentEntry()`, so the command-surface name delegates rather than reimplementing.
 - **`EndSession` restamps `EndedAt` on every call (TTC parity — user decision, 2026-09-18).** A repeat
@@ -127,6 +144,12 @@ so far:
    file name, from shifting with the machine locale. Unchanged from the first implementation.
 3. **Ending a session twice — match TTC and restamp `EndedAt`.** Reverses the original idempotent
    implementation.
+4. **The four tracking operations are distinct, not aliases.** Start applies when time is not tracked
+   (a no-op if it is); Stop-and-start applies when a task is active; Stop stops without starting a new
+   task; Stop-and-exit confirms, stops, saves and exits. Implemented as `StartEntry`, `RestartEntry`,
+   `StopCurrentEntry`/`StopTracking` and `EndSession` — with confirmation, flushing and exiting left to
+   the caller. This reverses the original "Play and Restart are one transition" implementation, and it
+   means the widget's Play button must dispatch on state rather than always calling `StartEntry`.
 
 Still open (asked one at a time, not yet answered): the duplicate command names
 (`StartEntry`/`RestartEntry`, `StopCurrentEntry`/`StopTracking`), whether a whitespace-only session
