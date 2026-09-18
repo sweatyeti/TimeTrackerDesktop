@@ -155,6 +155,11 @@ so far:
    means the widget's Play button must dispatch on state rather than always calling `StartEntry`.
 5. **A whitespace-only session name counts as blank and is generated.** Deviates from TTC's
    `IsNullOrEmpty` test, because a name of only spaces slugs to `---.json`.
+6. **`PublishTrimmed=false` stays.** The VS template trims on non-Debug; WinUI is reflection-heavy and
+   the plan prefers a diagnosable payload, so trimming stays off.
+7. **The repository stays public.** The plan and the provisioning card said private; the user confirmed
+   public, consistent with `sweatyeti/TimeTrackerConsole`. Consequence accepted: no credentials or
+   host-specific paths may ever be committed.
 
 Still open (asked one at a time, not yet answered): `PublishTrimmed=false`, repository visibility (the
 plan says private, the repo is public), how to reconcile `main`'s unrelated history at promotion, the
