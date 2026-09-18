@@ -49,11 +49,16 @@ public sealed class SessionBehaviorTests
     public void New_session_keeps_an_explicit_name_verbatim()
     {
         Assert.Equal("site review", SessionState.New("site review", Noon).Name);
+        Assert.Equal("Session 2026-09-18", SessionState.New("Session 2026-09-18", Noon).Name);
+    }
 
-        // TTC tests IsNullOrEmpty, not IsNullOrWhiteSpace - a whitespace-only name is KEPT, not
-        // replaced with a generated one. Preserved deliberately; it changes the file name a session
-        // produces, so "tidying" it here would silently move where a session is written.
-        Assert.Equal("   ", SessionState.New("   ", Noon).Name);
+    [Fact]
+    public void A_whitespace_only_name_counts_as_blank_and_is_generated()
+    {
+        // Deliberate deviation from TTC, which tests IsNullOrEmpty: a name of only spaces is kept
+        // there and slugs to "---.json", so it is treated as blank here instead.
+        Assert.Equal("Session 2026-09-18 12:00:00", SessionState.New("   ", Noon).Name);
+        Assert.Equal("Session 2026-09-18 12:00:00", SessionState.New("\t \n", Noon).Name);
     }
 
     [Fact]
