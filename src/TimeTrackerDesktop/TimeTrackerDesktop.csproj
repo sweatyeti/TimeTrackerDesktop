@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 11 only: the platform version supplies the Windows 11 SDK projections and the
+         minimum version is Windows 11 21H2. Both were validated by a real build on the Windows
+         toolchain, not chosen by guesswork. -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <RootNamespace>TimeTrackerDesktop</RootNamespace>
+    <AssemblyName>TimeTrackerDesktop</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- v1 ships unpackaged (portable win-x64 folder in a ZIP): no package identity, no MSIX. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+
+    <!-- Portable/self-contained publish settings deliberately live in the publish profile
+         (Properties/PublishProfiles/win-x64.pubxml) so ordinary Debug builds stay simple. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TimeTrackerDesktop.Domain\TimeTrackerDesktop.Domain.csproj" />
+    <ProjectReference Include="..\TimeTrackerDesktop.Persistence\TimeTrackerDesktop.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+</Project>

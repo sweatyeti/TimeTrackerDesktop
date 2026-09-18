@@ -7,6 +7,12 @@ on:
     branches: [dev]
 
 jobs:
+  # Non-UI layers only. WinUI cannot compile on Linux (the Windows App SDK XAML compiler is
+  # Windows-only), so the application project and its test project are excluded on purpose.
+  #
+  # Note: dotnet restore/build/test accept exactly ONE project argument, so the non-UI projects are
+  # driven through the two test projects (which reference Domain and Persistence) rather than by
+  # passing several project paths to a single command.
   linux-compatible:
     runs-on: ubuntu-latest
     steps:
@@ -14,10 +20,21 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: dotnet restore TimeTrackerDesktop.slnx
-      - run: dotnet build TimeTrackerDesktop.slnx -c Release --no-restore --nologo
-      - run: dotnet test TimeTrackerDesktop.slnx -c Release --no-build --nologo
+      - name: Restore
+        run: |
+          dotnet restore tests/TimeTrackerDesktop.Domain.Tests/TimeTrackerDesktop.Domain.Tests.csproj --nologo
+          dotnet restore tests/TimeTrackerDesktop.Persistence.Tests/TimeTrackerDesktop.Persistence.Tests.csproj --nologo
+      - name: Build
+        run: |
+          dotnet build tests/TimeTrackerDesktop.Domain.Tests/TimeTrackerDesktop.Domain.Tests.csproj -c Release --no-restore --nologo
+          dotnet build tests/TimeTrackerDesktop.Persistence.Tests/TimeTrackerDesktop.Persistence.Tests.csproj -c Release --no-restore --nologo
+      - name: Test
+        run: |
+          dotnet test tests/TimeTrackerDesktop.Domain.Tests/TimeTrackerDesktop.Domain.Tests.csproj -c Release --no-build --nologo
+          dotnet test tests/TimeTrackerDesktop.Persistence.Tests/TimeTrackerDesktop.Persistence.Tests.csproj -c Release --no-build --nologo
 
+  # Authoritative Windows compile/test/publish is plan Task 7.1. Until then this job only records
+  # that the Windows path is intentionally unimplemented — it must not be read as a passing build.
   windows-placeholder:
     runs-on: windows-latest
     steps:
