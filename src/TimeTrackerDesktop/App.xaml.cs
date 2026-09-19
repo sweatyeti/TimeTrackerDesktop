@@ -1,28 +1,41 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using TimeTrackerDesktop.Domain;
+using TimeTrackerDesktop.Persistence;
 using TimeTrackerDesktop.Platform.Windows;
+using TimeTrackerDesktop.ViewModels;
+using TimeTrackerDesktop.Windows;
 
 namespace TimeTrackerDesktop;
 
 /// <summary>
-/// Application entry point. Phase 3 wires the integration spike together: one instance, a tray icon, and the
-/// borderless window. Session state, view models and the real widget surface are later phases, and
-/// <c>SessionService</c> remains the sole authority for mutable session state.
+/// The application composition root (plan Task 4.1).
+///
+/// This is the one place that decides where sessions live, which store reads them, and which clock the whole
+/// app shares. Everything downstream takes those as arguments, which is what keeps the domain and the view
+/// models testable without a UI thread.
+///
+/// Startup order matters: the chooser is shown <b>before</b> any widget surface exists, because the plan
+/// requires a session choice before the widget opens.
 /// </summary>
 public partial class App : Application
 {
     private readonly IWindowInteropService _interop = new WindowInteropService();
     private readonly ISingleInstanceService _singleInstance = new SingleInstanceService();
     private readonly TrayIconService _tray = new();
+    private readonly IClock _clock = new SystemClock();
 
-    private MainWindow? _window;
+    private MainWidgetWindow? _window;
+    private SessionService? _session;
 
     public App() => InitializeComponent();
 
+    /// <summary>The live session, once the user has chosen one.</summary>
+    public SessionService? Session => _session;
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // A second launch has already asked the first instance to show itself, so this one has nothing left
-        // to do but leave. Creating a window first would briefly flash a second widget.
+        // a second launch has already asked the first instance to show itself, so this one just leaves
         if(!_singleInstance.IsFirstInstance)
         {
             Exit();
@@ -31,15 +44,13 @@ public partial class App : Application
 
         _singleInstance.ShowRequested += (_, _) => _window?.ShowAndFocus();
 
-        _window = new MainWindow(_interop);
+        _window = new MainWidgetWindow(_interop);
+        _window.SessionChosen += OnSessionChosen;
         _window.Activate();
 
         _tray.LeftClicked += (_, _) =>
         {
             _window?.ShowAndFocus();
-
-            // reported on the surface so the spike's tray check is observable in a screenshot, rather than
-            // inferred from a window that may already be in front
             _window?.ReportStatus("Tray: left click received");
         };
 
@@ -51,21 +62,40 @@ public partial class App : Application
 
         try
         {
-            _tray.Show(_window, "TimeTrackerDesktop (spike)");
+            _tray.Show(_window, "TimeTrackerDesktop");
         }
         catch(InvalidOperationException exception)
         {
-            // a missing tray icon must not stop the app: report it on the surface instead
             _window.ReportStatus($"Tray icon unavailable: {exception.Message}");
         }
 
         _window.Closed += (_, _) => _tray.Dispose();
+
+        _window.ShowChooser(CreateChooser());
     }
 
     /// <summary>
-    /// The tray's right-click menu. A flyout anchored to the window's content: the spike needs to prove the
-    /// callback arrives, not to design the final menu.
+    /// Builds the chooser from the app's own decisions: the storage folder, the store that reads it, and the
+    /// shared clock. The folder comes from preferences, resolved against the store's default — a stored
+    /// preference that is unset means "wherever the app puts sessions", not a frozen absolute path.
     /// </summary>
+    private SessionChooserViewModel CreateChooser()
+    {
+        UserPreferences preferences = new PreferencesStore(PreferencesStore.DefaultFilePath).Read();
+        string storageFolder = preferences.ResolveStorageFolder(AtomicSessionStore.DefaultDirectory);
+
+        return new SessionChooserViewModel(new AtomicSessionStore(storageFolder), storageFolder, _clock);
+    }
+
+    private void OnSessionChosen(object? sender, SessionService session)
+    {
+        _session = session;
+
+        // the widget surface is Task 4.2; until then the chosen session is reported rather than pretended
+        _window?.ReportStatus($"Session '{session.State.Name}' open. Widget surface arrives in Task 4.2.");
+    }
+
+    /// <summary>The tray's right-click menu.</summary>
     private void ShowTrayMenu()
     {
         if(_window?.Content is not FrameworkElement anchor)

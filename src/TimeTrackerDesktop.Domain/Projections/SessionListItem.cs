@@ -43,10 +43,14 @@ public static class SessionListProjection
     }
 
     /// <summary>
-    /// Builds the rows newest first. Ties break on the name so the order never depends on the order the
-    /// sessions happened to be listed in — "stable" has to mean reproducible, not incidental.
+    /// The sessions in chooser order: newest first, ties broken on the name so the order never depends on the
+    /// order the sessions happened to be listed in.
+    ///
+    /// Separate from <see cref="NewestFirst"/> so a caller that needs the session behind each row — the
+    /// chooser does, to resume it — gets the same order without reimplementing the rule and risking a
+    /// mismatch between a row and the session it points at.
     /// </summary>
-    public static IReadOnlyList<SessionListItem> NewestFirst(IEnumerable<SessionState> states)
+    public static IReadOnlyList<SessionState> Ordered(IEnumerable<SessionState> states)
     {
         ArgumentNullException.ThrowIfNull(states);
 
@@ -54,10 +58,16 @@ public static class SessionListProjection
         [
             .. states
                 .OrderByDescending(state => state.StartedAt)
-                .ThenBy(state => state.Name, StringComparer.Ordinal)
-                .Select(From),
+                .ThenBy(state => state.Name, StringComparer.Ordinal),
         ];
     }
+
+    /// <summary>
+    /// Builds the rows newest first. Ties break on the name so the order never depends on the order the
+    /// sessions happened to be listed in — "stable" has to mean reproducible, not incidental.
+    /// </summary>
+    public static IReadOnlyList<SessionListItem> NewestFirst(IEnumerable<SessionState> states) =>
+        [.. Ordered(states).Select(From)];
 
     /// <summary>
     /// The session's total tracked time: every completed, non-deleted entry, untracked ("none") time
