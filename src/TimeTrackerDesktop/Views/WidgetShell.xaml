@@ -12,8 +12,13 @@
 
     <!-- The compact widget card (plan Task 4.2). Every state difference is expressed as wording or as a
          control's presence, never as colour alone: the state line reads "No task running" when idle, the task
-         and description fields disappear, and Stop is disabled rather than merely dimmed. -->
+         and description fields disappear, and Stop is disabled rather than merely dimmed.
+
+         The explicit size is load-bearing: WinUI sizes a window from its content's desired size, so this is
+         what gives the widget its compact card rather than a default. -->
     <Border
+        Width="420"
+        Height="260"
         Background="{ThemeResource WidgetCardBrush}"
         BorderBrush="{ThemeResource WidgetCardBorderBrush}"
         BorderThickness="1"

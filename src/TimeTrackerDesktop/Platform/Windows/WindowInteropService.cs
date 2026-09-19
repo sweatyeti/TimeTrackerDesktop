@@ -38,6 +38,13 @@ public interface IWindowInteropService
     /// <summary>Reads the cursor's absolute screen position.</summary>
     void GetCursorPosition(out int x, out int y);
 
+    /// <summary>
+    /// Sizes the window, keeping its position. Uses <c>SetWindowPos</c> rather than the presenter, because a
+    /// borderless presenter has no resize frame and <c>AppWindow.Resize</c> did not take effect on this window
+    /// — measured: the chooser's buttons stayed clipped off the bottom.
+    /// </summary>
+    void SetSize(Window window, int width, int height);
+
     /// <summary>Applies the Windows 11 corner preference.</summary>
     void SetRoundedCorners(Window window, bool rounded);
 
@@ -128,6 +135,8 @@ public sealed class WindowInteropService : IWindowInteropService
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
 
+    private const uint SWP_NOZORDER = 0x0004;
+
     private static readonly nint HWND_TOPMOST = -1;
     private static readonly nint HWND_NOTOPMOST = -2;
 
@@ -139,7 +148,9 @@ public sealed class WindowInteropService : IWindowInteropService
         if(window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
         {
             presenter.SetBorderAndTitleBar(hasBorder: false, hasTitleBar: false);
-            presenter.IsResizable = false;
+
+            // resizable is deliberately left alone: the widget's size comes from the plan's presets (Task 4.3)
+            // and, in the meantime, refusing resize also blocked the explicit sizing the chooser needs
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
         }
@@ -205,6 +216,20 @@ public sealed class WindowInteropService : IWindowInteropService
 
         x = point.X;
         y = point.Y;
+    }
+
+    public void SetSize(Window window, int width, int height)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        _ = SetWindowPos(
+            HandleOf(window),
+            0,
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     public void SetRoundedCorners(Window window, bool rounded)

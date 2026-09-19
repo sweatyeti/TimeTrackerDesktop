@@ -58,6 +58,15 @@ public sealed partial class MainWidgetWindow : Window
     /// <summary>Raised once the user has chosen a session in the chooser.</summary>
     public event EventHandler<SessionService>? SessionChosen;
 
+    /// <summary>
+    /// The chooser needs room for its rows and buttons; the widget is a compact card. Both are set explicitly
+    /// because a borderless window with no requested size gets a default that clipped the chooser's buttons
+    /// off the bottom — measured, not assumed: the button text was absent from a screenshot of the running app.
+    /// </summary>
+    private static readonly global::Windows.Graphics.SizeInt32 ChooserSize = new(460, 620);
+
+    private static readonly global::Windows.Graphics.SizeInt32 WidgetSize = new(420, 260);
+
     /// <summary>Shows the session chooser. The widget surface replaces it once a session is chosen.</summary>
     public void ShowChooser(SessionChooserViewModel viewModel)
     {
@@ -66,6 +75,7 @@ public sealed partial class MainWidgetWindow : Window
         page.SessionChosen += (_, session) => SessionChosen?.Invoke(this, session);
 
         Host.Content = page;
+        _interop.SetSize(this, ChooserSize.Width, ChooserSize.Height);
     }
 
     /// <summary>
@@ -82,6 +92,7 @@ public sealed partial class MainWidgetWindow : Window
         WidgetShell shell = new(new WidgetViewModel(session, clock));
 
         Host.Content = shell;
+        _interop.SetSize(this, WidgetSize.Width, WidgetSize.Height);
 
         if(_tickTimer is null)
         {

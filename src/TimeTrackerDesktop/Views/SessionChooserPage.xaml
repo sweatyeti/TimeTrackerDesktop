@@ -7,8 +7,16 @@
 
     <!-- Plan Task 4.1: a session must be chosen before the widget opens. Start New Session is the primary
          action and needs no name, so it is the accented button; Resume is only available once a row is
-         selected, which is what makes the disabled state meaningful rather than decorative. -->
-    <Grid Padding="16" RowSpacing="12">
+         selected, which is what makes the disabled state meaningful rather than decorative.
+
+         The explicit size is load-bearing: WinUI sizes a window from its content's desired size, and without
+         it the window opened short enough to clip the action buttons off the bottom. Measured on Windows 11 -
+         the button text was absent from a screenshot of the running app. -->
+    <Grid
+        Width="460"
+        Height="620"
+        Padding="16"
+        RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
