@@ -164,3 +164,44 @@ so far:
 Still open: the `github-legacy` skill (deleted 2026-09-18) and the VM scratch directory (cleaned
 2026-09-18) — **all ten decision questions are now answered.**
 
+## Task 1.3 — entry editing rules (2026-09-18)
+
+**Shape: one operation owns the rules.** `UpdateEntry(id, EntryEdit)` is the only place a task,
+description or logged state is written. `EntryEdit` uses `null` for "leave this field alone", so a
+caller states only what it wants changed — which is what lets a description-only edit leave the task
+untouched. `UpdateActiveEntry(edit)` is the live-edit path for the current-entry panel: it resolves
+the active entry itself and otherwise reports `NoActiveEntry`, so a view model never re-derives "which
+entry is running" (invariant 9).
+
+**Why one operation rather than three setters:** TTC's `ApplyEntryUpdate(entryId, logged, task,
+description)` applies all three fields in a single atomic block (the fix for its own half-applied
+update), and this task's objective is to *centralize* the mutation rules. Three setters would give the
+shared eligibility rules three chances to drift apart.
+
+**The rules, and where each came from:**
+
+- **Task — trim, blank maps to `none`.** The plan's rule, and the same normalization TTC's *insert*
+  path uses. **TTC's update path trims only**, so it can write an empty-string task, which becomes a
+  task group named `""`. Our reader still preserves such a value byte-for-byte when it arrives from a
+  TTC file; we never create one ourselves.
+- **Description — trim, blank stays an empty string.** TTC trims descriptions on update; the plan adds
+  that blank text is preserved as an empty string rather than mapped to `none`, because a description
+  has no "no value" meaning of its own.
+- **Logged — completed, named, non-deleted only.** TTC's `HasLoggedState` is `IsComplete && !IsNoTask`
+  (case-insensitive, so "None" cannot log a phantom group); the plan adds non-deleted. The check lives
+  in the service as well as being offered as `TimeEntry.CanHoldLoggedState`, so a caller that forgets
+  cannot write a logged state that cannot exist.
+- **Deleted entries are read-only** for every field until restored.
+- **No time editing.** There is no start/end operation in the public API, and a reflection canary
+  (`The_public_domain_api_exposes_no_start_or_end_time_editing`) fails if one is ever added.
+
+**Refusals are named, not swallowed.** `EntryEditResult.Outcome` distinguishes `Applied`, `Unchanged`
+(valid, but the entry already holds those values), `EntryNotFound`, `NoActiveEntry`, `EntryDeleted`,
+`LoggedNotApplicable` and `NothingToDo`, with a `Reason` for a status line. The plan asks for "a
+deliberate domain validation result rather than silently changing state" — a `void` setter could not
+express any of that.
+
+**Removed:** `UpdateTask(string?)` and `UpdateDescription(string?)` (active-entry, `void`). They were
+placeholders whose result contracts this task owns; leaving them beside `UpdateEntry` would have given
+the same field two write paths with two chances to disagree.
+

@@ -53,6 +53,39 @@ public sealed record TimeEntry(
     public TimeEntry Complete(DateTimeOffset at) => this with { EndTime = at, IsComplete = true };
 
     /// <summary>
+    /// A non-deleted entry's task and description can be edited; a soft-deleted entry is read-only
+    /// until it is restored.
+    /// </summary>
+    public bool IsEditable => !IsDeleted;
+
+    /// <summary>
+    /// True when the entry has a logged state at all — TTC's <c>HasLoggedState</c>. In-progress work
+    /// has nothing to log yet, and "none" is untracked time rather than a task group, so neither can
+    /// carry one. Compared case-insensitively via <see cref="HasNoTask"/>, so a user typing "None"
+    /// cannot log a phantom group.
+    /// </summary>
+    public bool CanHoldLoggedState => IsComplete && !HasNoTask;
+
+    /// <summary>
+    /// Applies a task edit: trims, then maps blank to <see cref="NoTask"/> — the same rule the insert
+    /// path uses, so editing a task away never leaves an empty-string task group behind.
+    /// </summary>
+    public TimeEntry WithTask(string? task) => this with { Task = NormalizeTask(task) };
+
+    /// <summary>
+    /// Applies a description edit. Trimmed like TTC's update path, and blank stays an empty string —
+    /// never the <c>none</c> sentinel, because a description has no "no value" meaning of its own.
+    /// </summary>
+    public TimeEntry WithDescription(string? description) =>
+        this with { Description = (description ?? string.Empty).Trim() };
+
+    /// <summary>
+    /// Applies a logged-state edit. The caller checks <see cref="CanHoldLoggedState"/> first; this is
+    /// the write, not the rule.
+    /// </summary>
+    public TimeEntry WithLogged(bool logged) => this with { Logged = logged };
+
+    /// <summary>
     /// Blank input means "no task": trims, then maps empty to <see cref="NoTask"/> — exactly TTC's
     /// insert path (<c>InsertNewEntry</c>). A task that is only whitespace is not preserved.
     /// </summary>

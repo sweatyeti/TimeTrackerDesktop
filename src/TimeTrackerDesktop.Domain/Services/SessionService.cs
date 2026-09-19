@@ -32,7 +32,7 @@ public sealed class SessionService
     ///
     /// <b>Tracking starts immediately, matching TTC's CLI <c>new</c>.</b> The entry is stamped at the
     /// current time and opens with the "none" task; the caller then prompts for a task and applies it
-    /// with <see cref="UpdateTask"/>. That ordering is deliberate and is what TTC does — it stamps the
+    /// with <see cref="UpdateActiveEntry"/>. That ordering is deliberate and is what TTC does — it stamps the
     /// start time <i>before</i> showing its task prompt, so time spent answering the prompt is tracked
     /// rather than lost. A caller that wants an idle session calls <see cref="StopCurrentEntry"/>
     /// straight after.
@@ -113,18 +113,79 @@ public sealed class SessionService
         return new SessionResult(State, SessionChange.SessionEnded, stopped.AffectedEntry);
     }
 
-    public void UpdateTask(string? task)
+    /// <summary>
+    /// <b>Edit</b> — the one place entry mutation rules live (plan Task 1.3):
+    /// <list type="bullet">
+    /// <item>a <c>null</c> field is left alone, so a caller states only what it wants changed;</item>
+    /// <item>the task is trimmed and blank maps to <c>none</c>;</item>
+    /// <item>the description is trimmed and blank stays an empty string;</item>
+    /// <item>logged state is writable only for completed, named, non-deleted entries.</item>
+    /// </list>
+    ///
+    /// Every refusal is named in the returned <see cref="EntryEditResult"/> rather than silently
+    /// ignored, and nothing is written when a request is refused. Start and end times are not editable:
+    /// there is no such operation in the v1 public domain API, and a name canary test enforces that.
+    /// </summary>
+    public EntryEditResult UpdateEntry(int id, EntryEdit edit)
     {
-        if(State.ActiveEntry is not { } active) return;
+        ArgumentNullException.ThrowIfNull(edit);
 
-        Replace(active with { Task = TimeEntry.NormalizeTask(task) });
+        TimeEntry? entry = State.Entries.SingleOrDefault(existing => existing.Id == id);
+
+        if(entry is null)
+        {
+            return new EntryEditResult(State, EntryEditOutcome.EntryNotFound);
+        }
+
+        if(edit.IsEmpty)
+        {
+            return new EntryEditResult(State, EntryEditOutcome.NothingToDo, entry);
+        }
+
+        // deleted entries are kept for restore, not for editing
+        if(!entry.IsEditable)
+        {
+            return new EntryEditResult(State, EntryEditOutcome.EntryDeleted, entry);
+        }
+
+        // TTC checks this before offering the logged prompt at all (HasLoggedState); doing it in the
+        // service as well means a caller that forgets cannot write a logged state that cannot exist
+        if(edit.Logged.HasValue && !entry.CanHoldLoggedState)
+        {
+            return new EntryEditResult(State, EntryEditOutcome.LoggedNotApplicable, entry);
+        }
+
+        TimeEntry edited = entry;
+
+        if(edit.Task is not null) edited = edited.WithTask(edit.Task);
+        if(edit.Description is not null) edited = edited.WithDescription(edit.Description);
+        if(edit.Logged.HasValue) edited = edited.WithLogged(edit.Logged.Value);
+
+        // normalization can make a request a no-op ("  weeding  " when the task is already "weeding")
+        if(edited == entry)
+        {
+            return new EntryEditResult(State, EntryEditOutcome.Unchanged, entry);
+        }
+
+        Replace(edited);
+
+        return new EntryEditResult(State, EntryEditOutcome.Applied, edited);
     }
 
-    public void UpdateDescription(string? description)
+    /// <summary>
+    /// The live-edit path: applies an edit to whatever entry is currently running.
+    ///
+    /// View models call this instead of re-deriving "which entry is active" from a snapshot (invariant
+    /// 9), and it reports <see cref="EntryEditOutcome.NoActiveEntry"/> rather than quietly doing
+    /// nothing when the session is idle.
+    /// </summary>
+    public EntryEditResult UpdateActiveEntry(EntryEdit edit)
     {
-        if(State.ActiveEntry is not { } active) return;
+        ArgumentNullException.ThrowIfNull(edit);
 
-        Replace(active with { Description = description ?? string.Empty });
+        return State.ActiveEntry is { } active
+            ? UpdateEntry(active.Id, edit)
+            : new EntryEditResult(State, EntryEditOutcome.NoActiveEntry);
     }
 
     /// <summary>Soft-deletes a completed entry. Open entries are not deletable.</summary>

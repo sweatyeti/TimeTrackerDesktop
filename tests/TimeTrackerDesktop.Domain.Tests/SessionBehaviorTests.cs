@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using TimeTrackerDesktop.Domain;
 
 namespace TimeTrackerDesktop.Domain.Tests;
@@ -590,7 +591,9 @@ public sealed class SessionBehaviorTests
 
         // the UI's task prompt happens here, which is why the stamp is taken first
         clock.Advance(TimeSpan.FromSeconds(20));
-        service.UpdateTask("site visit");
+        EntryEditResult edit = service.UpdateActiveEntry(new EntryEdit(Task: "site visit"));
+
+        Assert.Equal(EntryEditOutcome.Applied, edit.Outcome);
 
         TimeEntry entry = Assert.Single(service.State.Entries);
         Assert.Equal("site visit", entry.Task);
@@ -618,5 +621,228 @@ public sealed class SessionBehaviorTests
         Assert.False(stopped.IsActive);
         Assert.Null(stopped.ActiveEntry);
         Assert.NotNull(stopped.AffectedEntry);
+    }
+
+    // ------------------------------------------------------------------
+    // Task 1.3 - live task/description/logged editing rules
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Editing_a_task_trims_it_and_maps_blank_to_none()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "weeding")), clock);
+
+        EntryEditResult padded = service.UpdateEntry(1, new EntryEdit(Task: "  code review  "));
+        EntryEditResult blank = service.UpdateEntry(1, new EntryEdit(Task: "   "));
+
+        Assert.Equal(EntryEditOutcome.Applied, padded.Outcome);
+        Assert.Equal("code review", padded.Entry!.Task);
+
+        // blank visible text is "no task", exactly as on the insert path - not an empty task group
+        Assert.Equal(TimeEntry.NoTask, blank.Entry!.Task);
+    }
+
+    [Fact]
+    public void A_live_task_edit_keeps_the_original_start_time()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "weeding")), clock);
+
+        clock.Advance(TimeSpan.FromMinutes(25));
+        EntryEditResult result = service.UpdateEntry(1, new EntryEdit(Task: "weeding the beds"));
+
+        // the timer renders from the persisted start time (invariant 8), so an edit must not move it
+        Assert.Equal(Noon, result.Entry!.StartTime);
+        Assert.Equal(Noon.AddMinutes(25), clock.Now);
+        Assert.Null(result.Entry.EndTime);
+        Assert.True(result.Entry.IsOpen);
+    }
+
+    [Fact]
+    public void A_description_edit_trims_and_keeps_blank_as_an_empty_string()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "weeding")), clock);
+
+        EntryEditResult padded = service.UpdateEntry(1, new EntryEdit(Description: "  back bed  "));
+        EntryEditResult blank = service.UpdateEntry(1, new EntryEdit(Description: "   "));
+
+        Assert.Equal("back bed", padded.Entry!.Description);
+
+        // blank is an empty string, never the "none" sentinel the task field uses
+        Assert.Equal(string.Empty, blank.Entry!.Description);
+    }
+
+    [Fact]
+    public void Task_and_description_edits_are_allowed_on_completed_entries()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "weeding", complete: true)), clock);
+
+        EntryEditResult result = service.UpdateEntry(1, new EntryEdit(Task: "weeding", Description: "front bed"));
+
+        Assert.Equal(EntryEditOutcome.Applied, result.Outcome);
+        Assert.Equal("front bed", result.Entry!.Description);
+        Assert.True(result.Entry.IsComplete);
+    }
+
+    [Fact]
+    public void Editing_a_soft_deleted_entry_is_rejected_and_changes_nothing()
+    {
+        FakeClock clock = new(Noon);
+        SessionState before = StateWith(Entry(1, "weeding", complete: true, deleted: true));
+        SessionService service = new(before, clock);
+
+        EntryEditResult result = service.UpdateEntry(
+            1,
+            new EntryEdit(Task: "renamed", Description: "x", Logged: true));
+
+        Assert.Equal(EntryEditOutcome.EntryDeleted, result.Outcome);
+        Assert.False(result.Applied);
+        Assert.Equal(before, result.State);
+    }
+
+    [Fact]
+    public void An_unknown_entry_id_is_reported_rather_than_ignored()
+    {
+        FakeClock clock = new(Noon);
+        SessionState before = StateWith(Entry(1, "weeding"));
+        SessionService service = new(before, clock);
+
+        EntryEditResult result = service.UpdateEntry(99, new EntryEdit(Task: "x"));
+
+        Assert.Equal(EntryEditOutcome.EntryNotFound, result.Outcome);
+        Assert.Equal(before, result.State);
+    }
+
+    [Fact]
+    public void An_edit_request_with_no_fields_is_reported_rather_than_written()
+    {
+        FakeClock clock = new(Noon);
+        SessionState before = StateWith(Entry(1, "weeding"));
+        SessionService service = new(before, clock);
+
+        EntryEditResult result = service.UpdateEntry(1, new EntryEdit());
+
+        Assert.Equal(EntryEditOutcome.NothingToDo, result.Outcome);
+        Assert.Equal(before, result.State);
+    }
+
+    [Fact]
+    public void Logged_state_is_writable_only_for_completed_named_undeleted_entries()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(
+            StateWith(
+                Entry(1, "weeding"),
+                Entry(2, "reading", complete: true),
+                Entry(3, "none", complete: true)),
+            clock);
+
+        // completed and named: the one case that has a logged state
+        Assert.Equal(EntryEditOutcome.Applied, service.UpdateEntry(2, new EntryEdit(Logged: true)).Outcome);
+        Assert.True(service.State.Entries.Single(entry => entry.Id == 2).Logged);
+
+        // still in progress: nothing to log yet
+        Assert.Equal(
+            EntryEditOutcome.LoggedNotApplicable,
+            service.UpdateEntry(1, new EntryEdit(Logged: true)).Outcome);
+        Assert.False(service.State.Entries.Single(entry => entry.Id == 1).Logged);
+
+        // "none" is untracked time, not a task group, so it has no logged state either
+        Assert.Equal(
+            EntryEditOutcome.LoggedNotApplicable,
+            service.UpdateEntry(3, new EntryEdit(Logged: true)).Outcome);
+        Assert.False(service.State.Entries.Single(entry => entry.Id == 3).Logged);
+    }
+
+    [Fact]
+    public void A_none_task_is_recognised_case_insensitively_for_logged_state()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "None", complete: true)), clock);
+
+        Assert.Equal(
+            EntryEditOutcome.LoggedNotApplicable,
+            service.UpdateEntry(1, new EntryEdit(Logged: true)).Outcome);
+    }
+
+    [Fact]
+    public void A_combined_edit_applies_every_field_in_one_call()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "reading", complete: true)), clock);
+
+        EntryEditResult result = service.UpdateEntry(
+            1,
+            new EntryEdit(Task: "reading", Description: "chapter 4", Logged: true));
+
+        Assert.Equal(EntryEditOutcome.Applied, result.Outcome);
+        Assert.Equal("reading", result.Entry!.Task);
+        Assert.Equal("chapter 4", result.Entry.Description);
+        Assert.True(result.Entry.Logged);
+    }
+
+    [Fact]
+    public void An_edit_that_would_change_nothing_reports_unchanged()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(StateWith(Entry(1, "weeding")), clock);
+
+        service.UpdateEntry(1, new EntryEdit(Task: "weeding", Description: "back bed"));
+        SessionState afterFirst = service.State;
+
+        // same values again, this time padded - normalization means it is still a no-op
+        EntryEditResult again = service.UpdateEntry(1, new EntryEdit(Task: "  weeding  ", Description: "back bed"));
+
+        Assert.Equal(EntryEditOutcome.Unchanged, again.Outcome);
+        Assert.Equal(afterFirst, again.State);
+    }
+
+    [Fact]
+    public void The_live_edit_operation_targets_the_active_entry_only()
+    {
+        FakeClock clock = new(Noon);
+        SessionService service = new(
+            StateWith(Entry(1, "weeding", complete: true), Entry(2, "reading")),
+            clock);
+
+        EntryEditResult result = service.UpdateActiveEntry(new EntryEdit(Task: "reading aloud"));
+
+        Assert.Equal(EntryEditOutcome.Applied, result.Outcome);
+        Assert.Equal(2, result.Entry!.Id);
+
+        // the completed entry is not the active one, so it must be left exactly as it was
+        Assert.Equal("weeding", service.State.Entries.Single(entry => entry.Id == 1).Task);
+    }
+
+    [Fact]
+    public void The_live_edit_operation_reports_when_nothing_is_running()
+    {
+        FakeClock clock = new(Noon);
+        SessionState before = StateWith(Entry(1, "weeding", complete: true));
+        SessionService service = new(before, clock);
+
+        EntryEditResult result = service.UpdateActiveEntry(new EntryEdit(Task: "x"));
+
+        Assert.Equal(EntryEditOutcome.NoActiveEntry, result.Outcome);
+        Assert.Equal(before, result.State);
+    }
+
+    [Fact]
+    public void The_public_domain_api_exposes_no_start_or_end_time_editing()
+    {
+        // the plan forbids time editing in the v1 public API. A name canary is the cheap way to stop
+        // one creeping in later, the same way the field-name drift canary guards the JSON contract.
+        string[] offenders =
+        [
+            .. typeof(SessionService)
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                .Select(method => method.Name)
+                .Where(name => name.Contains("time", StringComparison.OrdinalIgnoreCase)),
+        ];
+
+        Assert.Empty(offenders);
     }
 }
