@@ -248,3 +248,37 @@ filter checks `!entry.IsDeleted`; the test asserted it and failed, so the rule n
 **Removed:** the bootstrap `Summary()` dictionary. Nothing referenced it and it applied none of TTC's
 rounding or untracked rules — a second, subtly different answer to the same question.
 
+## Task 1.5 — resume normalization and chooser metadata (2026-09-18)
+
+**Resume is not "start".** `SessionResumeService.Resume(state, clock)` is a separate entry point from
+`SessionService.StartNewSession`, which begins tracking immediately. A resumed session mints nothing
+and restamps nothing: a running entry keeps its original start time (invariant 6), the next id is
+`max(stored id) + 1` (which is what makes v1's id gaps safe), and a session with no unfinished entry
+opens **idle** rather than creating one.
+
+**A corrupt session is refused, not repaired.** More than one unfinished non-deleted entry means
+nothing in the file says which one is running. Plan Q3 settles this as a refusal, so `Resume` returns
+`CorruptMultipleUnfinishedEntries` with the offending ids and a **null** `Session` — there is no object
+to open read-only, repair, or offer for export. The check runs before the service is constructed,
+because the constructor throws on this and a throw is not something a chooser can render.
+
+**Deleted entries never make a session corrupt.** Active state comes from non-deleted incomplete
+entries, so a deleted-and-unfinished stub (reachable in a hand-edited or damaged file) is ignored
+rather than counted as a second running entry.
+
+**Chooser metadata — the user's answer (2026-09-18).** The plan said "duration **or** entry count" and
+never picked one; TTC's chooser shows neither. The user asked for the session's **start time** and the
+**amount of tracked time**, with no entry count.
+
+**What "tracked time" means here, and why it differs from the summary's totals:**
+
+- it covers every completed, non-deleted entry, untracked (`none`) time **included** — this is the
+  session's own total, whereas the summary's named totals deliberately exclude untracked time because
+  they answer a different question;
+- it rounds each entry up before summing, reusing the summary's rule so the two can never disagree
+  about how long an entry was;
+- the running entry is excluded, so the number does not creep upward while the chooser sits open.
+
+**Ordering is reproducible, not incidental.** Newest first by start time, ties broken by name ordinal,
+so the order never depends on the order the sessions happened to be listed in.
+
