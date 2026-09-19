@@ -25,6 +25,7 @@ public partial class App : Application
     private readonly TrayIconService _tray = new();
     private readonly IClock _clock = new SystemClock();
 
+    private UserPreferences _preferences = UserPreferences.Default;
     private MainWidgetWindow? _window;
     private SessionService? _session;
 
@@ -43,6 +44,10 @@ public partial class App : Application
         }
 
         _singleInstance.ShowRequested += (_, _) => _window?.ShowAndFocus();
+
+        // read once, applied everywhere: the composition root is the one place that decides this, and a second
+        // read elsewhere could disagree with it (Task 4.3)
+        _preferences = new PreferencesStore(PreferencesStore.DefaultFilePath).Read();
 
         _window = new MainWidgetWindow(_interop);
         _window.SessionChosen += OnSessionChosen;
@@ -81,8 +86,7 @@ public partial class App : Application
     /// </summary>
     private SessionChooserViewModel CreateChooser()
     {
-        UserPreferences preferences = new PreferencesStore(PreferencesStore.DefaultFilePath).Read();
-        string storageFolder = preferences.ResolveStorageFolder(AtomicSessionStore.DefaultDirectory);
+        string storageFolder = _preferences.ResolveStorageFolder(AtomicSessionStore.DefaultDirectory);
 
         return new SessionChooserViewModel(new AtomicSessionStore(storageFolder), storageFolder, _clock);
     }
@@ -91,8 +95,8 @@ public partial class App : Application
     {
         _session = session;
 
-        // the chooser has done its job: the widget takes over the surface
-        _window?.ShowWidget(session, _clock);
+        // the chooser has done its job: the widget takes over the surface, sized and stacked per the preferences
+        _window?.ShowWidget(session, _clock, _preferences);
         _window?.ReportStatus($"Session '{session.State.Name}' open.");
     }
 

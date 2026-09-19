@@ -8,11 +8,11 @@ using TimeTrackerDesktop.Views;
 namespace TimeTrackerDesktop.Windows;
 
 /// <summary>
-/// The widget window (plan Task 4.1). It opens on the session chooser, and the widget surface replaces the
-/// chooser once a session is chosen — Task 4.2 builds that surface.
+/// The widget window (plan Tasks 4.1-4.3). It opens on the session chooser, and the widget surface replaces
+/// the chooser once a session is chosen.
 ///
 /// The window chrome and the drag come from the Phase 3 spike, whose five checks passed on Windows 11, so
-/// none of that behaviour is re-guessed here.
+/// none of that behaviour is re-guessed here. Size and always-on-top come from <see cref="UserPreferences"/>.
 /// </summary>
 public sealed partial class MainWidgetWindow : Window
 {
@@ -59,16 +59,11 @@ public sealed partial class MainWidgetWindow : Window
     public event EventHandler<SessionService>? SessionChosen;
 
     /// <summary>
-    /// The chooser needs room for its rows and buttons; the widget is a compact card. Both are set explicitly
-    /// because a borderless window with no requested size gets a default that clipped the chooser's buttons.
-    ///
-    /// The widget's height is measured, not chosen: its content - state line, started, elapsed, task field,
-    /// description field, then the button row - needs more than 260, and at 260 the tracking buttons were laid
-    /// out but pushed past the bottom edge, so the widget rendered as text with no controls at all.
+    /// The chooser needs room for its rows and buttons, and a borderless window with no requested size gets a
+    /// default that clipped them. The widget's size is no longer a constant here: it comes from the user's
+    /// Compact/Comfortable/Expanded preference, because a preset that does not change the window is decoration.
     /// </summary>
     private static readonly global::Windows.Graphics.SizeInt32 ChooserSize = new(460, 620);
-
-    private static readonly global::Windows.Graphics.SizeInt32 WidgetSize = new(420, 430);
 
     /// <summary>Shows the session chooser. The widget surface replaces it once a session is chosen.</summary>
     public void ShowChooser(SessionChooserViewModel viewModel)
@@ -130,25 +125,44 @@ public sealed partial class MainWidgetWindow : Window
     }
 
     /// <summary>
-    /// Shows the widget for a chosen session (plan Task 4.2).
+    /// Shows the widget for a chosen session (plan Tasks 4.2 and 4.3).
     ///
-    /// The timer only refreshes the duration text: the elapsed time is always derived from the entry's
-    /// persisted start, so a missed tick, a suspended process or a hidden window cannot make it wrong.
+    /// The timer only refreshes the display: the elapsed time is always derived from the entry's persisted
+    /// start, so a missed tick, a suspended process or a hidden window cannot make it wrong — and no tick ever
+    /// writes to the session, so the recorded start time cannot move.
+    ///
+    /// Size and always-on-top come from the user's preferences rather than constants. That is what makes the
+    /// presets and the toggle mean anything, and it is why the height is taken from the view model, which
+    /// enforces the explicit content minimum a preset may not go below.
     /// </summary>
-    public void ShowWidget(SessionService session, IClock clock)
+    public void ShowWidget(SessionService session, IClock clock, UserPreferences preferences)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(preferences);
 
-        WidgetShell shell = new(new WidgetViewModel(session, clock));
+        WidgetViewModel viewModel = new(session, clock, preferences);
 
-        AppWindow.Resize(WidgetSize);
+        // Text scaling is a UI concern, so it is read here and handed over as a plain number: a view model that
+        // referenced a WinUI type would stop being testable without a UI thread. Measured: at 150% the card at
+        // its nominal preset height clipped the button row, so the view model has to know the scaling.
+        viewModel.TextScale = new global::Windows.UI.ViewManagement.UISettings().TextScaleFactor;
 
-        // The window resize does not re-measure an already-laid-out content root: the frame stayed 444x575
-        // inside a 420x260 window, which clipped the widget's button row. Sizing the root explicitly is what
-        // makes the card fill the window. Measured, with both AppWindow.Resize and SetWindowPos.
-        DragSurface.Width = WidgetSize.Width;
-        DragSurface.Height = WidgetSize.Height;
+        WidgetShell shell = new(viewModel);
+
+        global::Windows.Graphics.SizeInt32 size = new(viewModel.WidgetWidth, viewModel.WidgetHeight);
+
+        _interop.SetTopmost(this, viewModel.AlwaysOnTop);
+
+        // AppWindow.Resize, not SetWindowPos: a raw SetWindowPos changes the HWND while WinUI keeps its own
+        // notion of the size, so the two disagree. Measured.
+        AppWindow.Resize(size);
+
+        // The measure taken immediately after a resize reports the PREVIOUS size and does not settle until the
+        // following layout pass (measured: host went 444x575, then 420x232 three seconds later). Sizing the root
+        // explicitly keeps the card filling the window in the meantime; removing it has not been proven safe.
+        DragSurface.Width = size.Width;
+        DragSurface.Height = size.Height;
 
         Host.Content = shell;
         WriteGeometryDiagnostic("after ShowWidget");

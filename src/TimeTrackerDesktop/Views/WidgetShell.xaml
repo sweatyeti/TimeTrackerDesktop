@@ -30,16 +30,14 @@
                 Text="{x:Bind ViewModel.StateLabel, Mode=OneWay}"
                 TextWrapping="Wrap" />
 
-            <StackPanel Spacing="0">
-                <TextBlock
-                    x:Name="StartedText"
-                    Style="{StaticResource WidgetMutedTextStyle}"
-                    Text="{x:Bind ViewModel.StartedDisplay, Mode=OneWay}" />
-                <TextBlock
-                    x:Name="ElapsedText"
-                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                    Text="{x:Bind ViewModel.ElapsedDisplay, Mode=OneWay}" />
-            </StackPanel>
+            <!-- The timer line (plan Task 4.3). The preference chooses which half is shown — the ticking
+                 duration or the started-at time — and whichever is not shown moves to the tooltip, so the
+                 choice is one of emphasis rather than of losing information. Two separate lines became one. -->
+            <TextBlock
+                x:Name="TimerLine"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="{x:Bind ViewModel.TimerText, Mode=OneWay}"
+                ToolTipService.ToolTip="{x:Bind ViewModel.TimerTooltip, Mode=OneWay}" />
 
             <TextBox
                 x:Name="TaskField"
