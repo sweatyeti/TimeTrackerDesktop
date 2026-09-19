@@ -282,3 +282,45 @@ never picked one; TTC's chooser shows neither. The user asked for the session's 
 **Ordering is reproducible, not incidental.** Newest first by start time, ties broken by name ordinal,
 so the order never depends on the order the sessions happened to be listed in.
 
+## Task 2.1 — the TTC-compatible JSON serializer (2026-09-18)
+
+**Reading uses `JsonNode`, not a typed deserialize.** The point is to keep the fields we do *not*
+understand: a typed reader drops them silently, and an older build sharing a session directory with a
+newer one would then delete the newer build's data on the next save. Unknown envelope and entry fields
+are retained, and retained entry fields are re-attached by **id**, because ids are keys that survive both
+edits and soft deletes.
+
+**A retained field can never override a known one.** Known fields are written first, in TTC's own key
+order, and a colliding key is skipped — so a file's stale copy of a field we are responsible for cannot
+resurrect itself.
+
+**The encoder bug the fixtures caught.** System.Text.Json's `DateTime`/`DateTimeOffset` writers bypass
+the encoder, so TTC writes a zero offset as a **literal plus**. The default encoder escapes a plus sign
+as a Unicode escape, so a writer that builds the JSON as a tree of string values emits an escaped offset
+and stops matching TTC byte for byte. The writer therefore uses `Utf8JsonWriter` with
+`WriteString(name, DateTimeOffset)`. Without the fixtures this would have shipped as a silent wire-format
+divergence — and it is now documented in `docs/JSON-COMPATIBILITY.md`, which had asserted the encoder
+rule without noticing the timestamp exception.
+
+**A second, wrong serializer was in the tree.** The Task 0.2 bootstrap `JsonSessionStore` carried its own
+copy built on `JsonSerializerDefaults.Web`: escaped offsets, unknown fields dropped, no validation. It now
+delegates to `TtcJsonSerializer`, so the project has one JSON answer instead of two.
+
+**Byte-identical round trips are asserted.** Re-writing a parsed v2 fixture reproduces TTC's bytes exactly,
+including the Unicode escaping and the trimmed fractional seconds. The v1 fixture is the deliberate
+exception: writing upgrades it to v2 and makes `isDeleted: false` explicit.
+
+**`isValid` is dropped, not retained.** It is TTC's runtime sentinel and was never part of the format, so
+treating it as "unknown" would round-trip a field that does not exist.
+
+**Line endings follow the platform, exactly as TTC's do.** System.Text.Json's indented writer defaults to
+`Environment.NewLine`, so a Linux emission uses LF and a Windows one uses CRLF. The first Windows run of
+the round-trip test failed on precisely this: the fixtures were emitted on Linux, so a raw byte comparison
+was testing the operating system. The behaviour is left as parity (TTC does the same) and the test now
+compares content with newlines normalised.
+
+**Refusals are named, and the file is never touched.** `TryRead` reports why a file was refused —
+unsupported `schemaVersion`, a `sessionId` that is not a GUID, malformed JSON — while `Read` throws
+`JsonException` for malformed JSON and `InvalidDataException` for the rest. A `schemaVersion` of `0`, which
+is what a *missing* key reads as, is refused: "absent" is not "version 0 is fine".
+
