@@ -34,8 +34,20 @@ public partial class App : Application
         _window = new MainWindow(_interop);
         _window.Activate();
 
-        _tray.LeftClicked += (_, _) => _window?.ShowAndFocus();
-        _tray.RightClicked += (_, _) => ShowTrayMenu();
+        _tray.LeftClicked += (_, _) =>
+        {
+            _window?.ShowAndFocus();
+
+            // reported on the surface so the spike's tray check is observable in a screenshot, rather than
+            // inferred from a window that may already be in front
+            _window?.ReportStatus("Tray: left click received");
+        };
+
+        _tray.RightClicked += (_, _) =>
+        {
+            _window?.ReportStatus("Tray: right click received");
+            ShowTrayMenu();
+        };
 
         try
         {

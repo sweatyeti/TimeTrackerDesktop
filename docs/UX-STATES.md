@@ -54,8 +54,26 @@ Run on Windows 11 (10.0.26200, 25H2) in the `timetracker-win11` VM, unpackaged.
 | 1 | Borderless window with rounded presentation, draggable from a non-interactive surface | **pass** | Window rendered with no system border or title bar, and dragged from (149,302) to (424,527) in the VM. **The first implementation failed** — see the drag note below. |
 | 2 | Text box and button keep normal interaction and do not begin a drag | **pass** | Typing `abc123` into the text box landed as `abc123`, and clicking the button toggled topmost. The window's title stayed at x=149 y=302 throughout, so neither press became a drag. |
 | 3 | Topmost get/set agree | **pass** | Clicking the toggle reported `Topmost requested: False; window reports: False`, and clicking again reported `True; True`. |
-| 4 | Tray icon: left-click show/focus, right-click menu callback | **partial** | The icon was created successfully — `TrayIconService.Show` throws when `Shell_NotifyIcon` fails and reports it on the surface, and the surface showed no error. **It is not in the visible tray area:** re-scanning the taskbar's icon blobs after launch showed no new icon, so Windows placed it in the hidden-icons overflow. The click callbacks have **not** been exercised. |
+| 4 | Tray icon: left-click show/focus, right-click menu callback | **pass** | Both callbacks fire: the surface reported `Tray: left click received` and `Tray: right click received`, and the right-click menu appeared showing **Show widget**. The icon had to be promoted out of the hidden-icons overflow first (see below). |
 | 5 | Second launch signals the first instance to show/focus, then exits | **pass** | A second launch in the same session left exactly one `TimeTrackerDesktop.exe` running (PID 6472, session 1). |
+
+### Raising the tray icon into the visible tray
+
+A newly-registered icon lands in the hidden-icons overflow, where its position cannot be found by looking at
+the taskbar — scanning the icon blobs before and after launch showed no new one. The fix is to promote it:
+Windows records tray icons under `HKCU\Control Panel\NotifyIconSettings\<id>`, keyed by `ExecutablePath`, and
+setting that entry's `IsPromoted` DWORD to `1` puts the icon in the visible tray at a known position. Restarting
+the app then re-registers it. This is a user-visible setting (the same thing the Settings UI does), not a hack,
+and it is what makes the tray check testable at all.
+
+### Making the callbacks observable
+
+A left click calls `ShowAndFocus()`, which is invisible when the window is already in front — so the first
+right-click attempts proved nothing either way. Each tray click now also reports itself on the widget's surface
+(`Tray: left click received` / `Tray: right click received`), which makes the check decidable from a screenshot
+instead of a guess.
+
+**Gate: CLOSED.** All five checks pass on Windows 11, so detached windows and visual polish may begin.
 
 ### Drag: a measured constraint, and the fix
 

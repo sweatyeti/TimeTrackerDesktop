@@ -449,8 +449,8 @@ element, so a press on a button arrives as the `TextBlock` inside it. Classifyin
 every button press start a window drag — the exact failure the spike's second check exists to catch. The
 implementation now walks **up** the visual tree from the original source.
 
-**Verification state — four of the five checks pass; the gate is not yet closed.** Full evidence is in
-`docs/UX-STATES.md`. Established:
+**Verification state — ALL FIVE CHECKS PASS; the gate is closed.** Full evidence is in `docs/UX-STATES.md`.
+Established:
 
 - The solution builds on Windows: **0 warnings / 0 errors**, **227/227** tests (App 18, Domain 84,
   Persistence 125).
@@ -458,9 +458,9 @@ implementation now walks **up** the visual tree from the original source.
 - **Check 1 pass** — borderless window, dragged from (149,302) to (424,527).
 - **Check 2 pass** — `abc123` typed into the text box landed intact; the button toggled; the window never moved.
 - **Check 3 pass** — `Topmost requested: False; window reports: False`, then `True; True`.
+- **Check 4 pass** — `Tray: left click received` and `Tray: right click received`, with the right-click menu
+  showing **Show widget**.
 - **Check 5 pass** — a second launch left exactly one process running.
-- **Check 4 partial** — the tray icon was created (the service throws and reports on failure, and no error was
-  shown), but the click callbacks have not been exercised.
 
 **The drag constraint, found by measurement.** The first implementation used `ReleaseCapture()` +
 `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`. It does nothing here, for a structural reason: `HTCAPTION` names a
