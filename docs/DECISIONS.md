@@ -161,7 +161,6 @@ so far:
    public, consistent with `sweatyeti/TimeTrackerConsole`. Consequence accepted: no credentials or
    host-specific paths may ever be committed.
 
-Still open (asked one at a time, not yet answered): `PublishTrimmed=false`, repository visibility (the
-plan says private, the repo is public), how to reconcile `main`'s unrelated history at promotion, the
-`github-legacy` skill still in the Telegram index, and the leftover VM scratch directory.
+Still open: the `github-legacy` skill (deleted 2026-09-18) and the VM scratch directory (cleaned
+2026-09-18) — **all ten decision questions are now answered.**
 
