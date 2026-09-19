@@ -449,29 +449,31 @@ element, so a press on a button arrives as the `TextBlock` inside it. Classifyin
 every button press start a window drag — the exact failure the spike's second check exists to catch. The
 implementation now walks **up** the visual tree from the original source.
 
-**Verification state — the gate is NOT passed.** What is established:
+**Verification state — four of the five checks pass; the gate is not yet closed.** Full evidence is in
+`docs/UX-STATES.md`. Established:
 
 - The solution builds on Windows: **0 warnings / 0 errors**, **227/227** tests (App 18, Domain 84,
   Persistence 125).
 - The 17 contract tests pass, including the drag-surface policy and the base-chain walk.
-- **The unpackaged WinUI app launches and stays running** on Windows 11 (10.0.26200, 25H2) in the VM:
-  `TimeTrackerDesktop.exe`, PID 10032, **Session 1 (Console)**.
+- **Check 1 pass** — borderless window, dragged from (149,302) to (424,527).
+- **Check 2 pass** — `abc123` typed into the text box landed intact; the button toggled; the window never moved.
+- **Check 3 pass** — `Topmost requested: False; window reports: False`, then `True; True`.
+- **Check 5 pass** — a second launch left exactly one process running.
+- **Check 4 partial** — the tray icon was created (the service throws and reports on failure, and no error was
+  shown), but the click callbacks have not been exercised.
 
-What is **not** yet established, and therefore what the gate still needs:
+**The drag constraint, found by measurement.** The first implementation used `ReleaseCapture()` +
+`SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`. It does nothing here, for a structural reason: `HTCAPTION` names a
+non-client *caption area*, and `OverlappedPresenter.SetBorderAndTitleBar(false, false)` removes exactly that. The
+drag was performed and the window did not move. The fix keeps the borderless design — the plan forbids falling
+back to conventional chrome — and drags by hand: capture the pointer, remember the cursor's screen position and
+the window's, then `AppWindow.Move` as it moves. Re-measured: the window moved. `BeginDrag` and the
+`WM_NCLBUTTONDOWN`/`HTCAPTION` machinery were deleted rather than left in place as dead, known-broken code.
 
-1. Borderless rounded chrome and drag-from-surface — not visually confirmed.
-2. Text box and button not starting a drag — policy tested, not confirmed by a real pointer press.
-3. Topmost get/set agreeing — not exercised.
-4. Tray icon left/right click — not exercised.
-5. Second launch signalling the first — not exercised.
+**Also measured:** a widget launched by the Task Scheduler cannot take the foreground and a borderless window is
+not an Alt+Tab candidate, so it cannot be raised that way; and the widget must set topmost at startup, because
+its default preference is always-on-top and a HUD that opens behind other windows is not doing its job.
 
-**Why the manual pass stalled, with evidence:** the VM's console was blank (screenshot: 1 distinct colour,
-all `#000000`), so a `KEY_LEFTSHIFT` was sent to wake it and the capture then showed a browser on the RustDesk
-releases page. A Task Scheduler `/it` launch cannot take the foreground, so the widget opened *behind* it —
-and repeated `Alt+Tab` cycles only between that browser and RustDesk, never the widget. A borderless window
-without `WS_EX_APPWINDOW` is not an Alt+Tab candidate, so it cannot be raised that way; the remaining routes
-are a real mouse click on the tray icon, or adding `WS_EX_APPWINDOW`/an explicit foreground call.
-
-**Consequence:** the spike is not merged. The plan's gate says detached windows and visual polish do not begin
-until all five checks pass, and merging would claim a gate that has not been met.
+**Consequence:** the spike is still not merged. The plan's gate says detached windows and visual polish do not
+begin until all five checks pass, and check 4's callbacks are outstanding.
 

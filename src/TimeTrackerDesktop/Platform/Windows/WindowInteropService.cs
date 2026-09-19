@@ -29,8 +29,14 @@ public interface IWindowInteropService
     /// </summary>
     bool ShouldBeginDrag(object? source);
 
-    /// <summary>Starts a window drag, as if the user had grabbed the title bar.</summary>
-    void BeginDrag(Window window);
+    /// <summary>
+    /// Moves the window to an absolute screen position. This, plus <see cref="GetCursorPosition"/>, is how a
+    /// drag is performed on a borderless window.
+    /// </summary>
+    void MoveTo(Window window, int x, int y);
+
+    /// <summary>Reads the cursor's absolute screen position.</summary>
+    void GetCursorPosition(out int x, out int y);
 
     /// <summary>Applies the Windows 11 corner preference.</summary>
     void SetRoundedCorners(Window window, bool rounded);
@@ -118,9 +124,6 @@ public sealed class WindowInteropService : IWindowInteropService
     private const int DWMWCP_ROUND = 2;
     private const int DWMWCP_DONOTROUND = 1;
 
-    private const int WM_NCLBUTTONDOWN = 0x00A1;
-    private const int HTCAPTION = 2;
-
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
@@ -187,13 +190,21 @@ public sealed class WindowInteropService : IWindowInteropService
         return true;
     }
 
-    public void BeginDrag(Window window)
+    public void MoveTo(Window window, int x, int y)
     {
-        nint handle = HandleOf(window);
+        ArgumentNullException.ThrowIfNull(window);
 
-        // the classic non-client drag: release the capture, then tell the window the caption was grabbed
-        ReleaseCapture();
-        SendMessage(handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        // fully qualified: this file's namespace is TimeTrackerDesktop.Platform.Windows, so a bare
+        // "Windows.Graphics" binds to the local namespace instead of the WinRT one
+        window.AppWindow.Move(new global::Windows.Graphics.PointInt32(x, y));
+    }
+
+    public void GetCursorPosition(out int x, out int y)
+    {
+        _ = GetCursorPos(out NativePoint point);
+
+        x = point.X;
+        y = point.Y;
     }
 
     public void SetRoundedCorners(Window window, bool rounded)
@@ -235,10 +246,14 @@ public sealed class WindowInteropService : IWindowInteropService
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ReleaseCapture();
+    private static extern bool GetCursorPos(out NativePoint point);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint SendMessage(nint windowHandle, int message, nint wParam, nint lParam);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint windowHandle, int attribute, ref int value, int size);

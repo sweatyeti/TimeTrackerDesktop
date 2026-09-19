@@ -51,12 +51,22 @@ Run on Windows 11 (10.0.26200, 25H2) in the `timetracker-win11` VM, unpackaged.
 
 | # | Check | Result | Evidence |
 |---|---|---|---|
-| 1 | Borderless window with rounded presentation, draggable from a non-interactive surface | pending | |
-| 2 | Text box and button keep normal interaction and do not begin a drag | pending | |
-| 3 | Topmost get/set agree | pending | |
-| 4 | Tray icon: left-click show/focus, right-click menu callback | pending | |
-| 5 | Second launch signals the first instance to show/focus, then exits | pending | |
+| 1 | Borderless window with rounded presentation, draggable from a non-interactive surface | **pass** | Window rendered with no system border or title bar, and dragged from (149,302) to (424,527) in the VM. **The first implementation failed** — see the drag note below. |
+| 2 | Text box and button keep normal interaction and do not begin a drag | **pass** | Typing `abc123` into the text box landed as `abc123`, and clicking the button toggled topmost. The window's title stayed at x=149 y=302 throughout, so neither press became a drag. |
+| 3 | Topmost get/set agree | **pass** | Clicking the toggle reported `Topmost requested: False; window reports: False`, and clicking again reported `True; True`. |
+| 4 | Tray icon: left-click show/focus, right-click menu callback | **partial** | The icon was created successfully — `TrayIconService.Show` throws when `Shell_NotifyIcon` fails and reports it on the surface, and the surface showed no error. The click callbacks have **not** been exercised. |
+| 5 | Second launch signals the first instance to show/focus, then exits | **pass** | A second launch in the same session left exactly one `TimeTrackerDesktop.exe` running (PID 6472, session 1). |
 
-**Gate:** detached windows and visual polish do not start until all five read *pass*. If an API or tooling
-constraint makes any of them infeasible, the plan gets revised with that evidence rather than substituting
-conventional window chrome.
+### Drag: a measured constraint, and the fix
+
+The first drag implementation used the classic `ReleaseCapture()` + `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`.
+**It does nothing on this window**, and the reason is structural rather than a coding slip: `HTCAPTION` names a
+*non-client caption area*, and `OverlappedPresenter.SetBorderAndTitleBar(false, false)` removes exactly that.
+Measured, not assumed — the drag was performed and the window did not move.
+
+The fix keeps the borderless design (the plan forbids substituting conventional chrome) and performs the drag
+by hand: capture the pointer, record the cursor's screen position and the window's position, then move the
+window with `AppWindow.Move` as the pointer moves. Re-measured: the window moved as intended.
+
+**Gate:** detached windows and visual polish do not start until all five read *pass*. Check 4's callbacks are
+the outstanding item.

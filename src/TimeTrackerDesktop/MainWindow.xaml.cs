@@ -13,6 +13,12 @@ public sealed partial class MainWindow : Window
 {
     private readonly IWindowInteropService _interop;
 
+    private bool _dragging;
+    private int _dragStartCursorX;
+    private int _dragStartCursorY;
+    private int _dragStartWindowX;
+    private int _dragStartWindowY;
+
     public MainWindow(IWindowInteropService interop)
     {
         ArgumentNullException.ThrowIfNull(interop);
@@ -24,7 +30,14 @@ public sealed partial class MainWindow : Window
         _interop.ApplyWidgetChrome(this);
         _interop.SetDarkMode(this, dark: true);
 
+        // always-on-top is the default preference, so the widget must start that way: a HUD that opens
+        // behind other windows is not doing its job. Phase 4.3 replaces this with the stored preference.
+        _interop.SetTopmost(this, topmost: true);
+        TopmostToggle.IsChecked = true;
+
         DragSurface.PointerPressed += OnDragSurfacePointerPressed;
+        DragSurface.PointerMoved += OnDragSurfacePointerMoved;
+        DragSurface.PointerReleased += OnDragSurfacePointerReleased;
         TopmostToggle.Click += OnTopmostToggled;
 
         StatusText.Text = "Chrome applied. Drag anywhere except the controls.";
@@ -50,7 +63,50 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _interop.BeginDrag(this);
+        // A borderless window has no caption, so WM_NCLBUTTONDOWN/HTCAPTION does nothing - measured, not
+        // assumed: the window did not move. The drag is therefore done by hand, from the cursor's screen
+        // position and the window's position at the moment of the press.
+        _dragging = true;
+
+        _interop.GetCursorPosition(out _dragStartCursorX, out _dragStartCursorY);
+
+        _dragStartWindowX = AppWindow.Position.X;
+        _dragStartWindowY = AppWindow.Position.Y;
+
+        DragSurface.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OnDragSurfacePointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if(!_dragging)
+        {
+            return;
+        }
+
+        _interop.GetCursorPosition(out int cursorX, out int cursorY);
+
+        _interop.MoveTo(
+            this,
+            _dragStartWindowX + (cursorX - _dragStartCursorX),
+            _dragStartWindowY + (cursorY - _dragStartCursorY));
+
+        ReportStatus($"Dragging: window at ({AppWindow.Position.X}, {AppWindow.Position.Y})");
+        e.Handled = true;
+    }
+
+    private void OnDragSurfacePointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if(!_dragging)
+        {
+            return;
+        }
+
+        _dragging = false;
+        DragSurface.ReleasePointerCapture(e.Pointer);
+
+        ReportStatus($"Window moved to ({AppWindow.Position.X}, {AppWindow.Position.Y})");
+        e.Handled = true;
     }
 
     private void OnTopmostToggled(object sender, RoutedEventArgs e)

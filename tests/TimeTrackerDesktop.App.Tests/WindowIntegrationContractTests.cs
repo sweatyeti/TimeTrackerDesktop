@@ -122,8 +122,14 @@ public sealed class WindowIntegrationContractTests
 
         public bool ShouldBeginDrag(object? source) => DragSurfacePolicy.CanStartDrag(source as Type ?? source?.GetType());
 
-        public void BeginDrag(Window window)
+        public void MoveTo(Window window, int x, int y)
         {
+        }
+
+        public void GetCursorPosition(out int x, out int y)
+        {
+            x = 0;
+            y = 0;
         }
 
         public void SetRoundedCorners(Window window, bool rounded)
