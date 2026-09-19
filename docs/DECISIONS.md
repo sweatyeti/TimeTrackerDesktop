@@ -324,3 +324,31 @@ unsupported `schemaVersion`, a `sessionId` that is not a GUID, malformed JSON �
 `JsonException` for malformed JSON and `InvalidDataException` for the rest. A `schemaVersion` of `0`, which
 is what a *missing* key reads as, is refused: "absent" is not "version 0 is fine".
 
+## Task 2.2 — atomic session storage and the flush coordinator (2026-09-18)
+
+**Storage is per-user, never the working directory.** `AtomicSessionStore.DefaultDirectory` resolves to
+`%LOCALAPPDATA%\TimeTrackerDesktop\entries` (the XDG data folder on Linux). TTC writes `entries/` relative
+to the process working directory, so the same session turns up in a different place depending on where the
+app was launched from — unusable for an unpackaged WinUI app that can be started from anywhere.
+
+**The write is atomic by construction.** Serialize first, so a JSON failure touches nothing on disk; then
+write `<name>.json.tmp` in the **same** directory, `Flush(flushToDisk: true)` — not plain `Flush()`, because
+moving the file into place is only atomic if the bytes are already durable — then
+`File.Move(..., overwrite: true)`. A crash leaves either the previous file or the complete new one. The same
+directory matters: a temporary file on another volume cannot be moved atomically, and the move would
+silently become a copy.
+
+**Cleanup only ever deletes `*.json.tmp`.** Litter left by a crash is the problem it solves; it must never be
+able to remove something a user might still want.
+
+**The snapshot is taken under the caller's boundary; the write happens outside it.** The caller passes the
+same object its mutations are made under, so a flush cannot capture a half-applied change — and cannot stall
+the UI for the length of a disk write. A test asserts both halves with `Monitor.IsEntered`.
+
+**A failed flush is never reported as success.** The dirty flag survives, `LastFailure` keeps the error as a
+durable UI-visible state, and the next flush retries. `FlushResult` separates `Written` from `NotDirty` so
+"nothing to save" cannot be mistaken for "saved".
+
+**Shutdown forces a final flush.** `RunAsync` catches cancellation and flushes once more, which is what makes
+the last few seconds of tracked work durable. A clean session is not rewritten.
+
