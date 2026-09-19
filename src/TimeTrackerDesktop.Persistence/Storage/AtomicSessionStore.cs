@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace TimeTrackerDesktop.Persistence;
 
 /// <summary>
@@ -12,9 +10,6 @@ namespace TimeTrackerDesktop.Persistence;
 /// </summary>
 public sealed class AtomicSessionStore : ISessionStore
 {
-    /// <summary>UTF-8 without a BOM, because a BOM makes the file unreadable to TTC.</summary>
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
-
     private readonly string _directoryPath;
 
     public AtomicSessionStore(string directoryPath)
@@ -45,18 +40,13 @@ public sealed class AtomicSessionStore : ISessionStore
     /// temporary file on another volume cannot be moved into place atomically, and the move would silently
     /// become a copy.
     /// </summary>
-    public static string TemporaryPathFor(string path)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-
-        return path + ".tmp";
-    }
+    public static string TemporaryPathFor(string path) => AtomicFile.TemporaryPathFor(path);
 
     public SessionDocument Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        return TtcJsonSerializer.Read(File.ReadAllText(path, Utf8NoBom));
+        return TtcJsonSerializer.Read(AtomicFile.Read(path));
     }
 
     public void Write(string path, SessionDocument document)
@@ -66,22 +56,9 @@ public sealed class AtomicSessionStore : ISessionStore
 
         System.IO.Directory.CreateDirectory(_directoryPath);
 
-        // serialize BEFORE touching the disk: if the JSON layer throws, nothing has been created or replaced
-        string json = TtcJsonSerializer.Write(document);
-
-        string temporary = TemporaryPathFor(path);
-
-        using(FileStream stream = new(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            stream.Write(Utf8NoBom.GetBytes(json));
-
-            // flushToDisk, not plain Flush(): moving the file into place is only atomic if the bytes are
-            // already durable when the move happens
-            stream.Flush(flushToDisk: true);
-        }
-
-        // same-volume move: the final name is either the old file or the complete new one
-        File.Move(temporary, path, overwrite: true);
+        // serialize BEFORE touching the disk, then let AtomicFile do the temp-write-flush-move: one
+        // implementation of the atomicity rule, shared with preferences
+        AtomicFile.Write(path, TtcJsonSerializer.Write(document));
     }
 
     /// <summary>

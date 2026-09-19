@@ -377,3 +377,44 @@ not a live object — and writes beside any existing file. Reading the file is w
 are independent" true by construction, and it is why exporting cannot stop a running entry or stamp the
 session as ended. A failed flush abandons the export rather than copying stale data.
 
+## Task 2.4 — preferences and storage-location migration (2026-09-18)
+
+**Only implemented preferences are persisted** — the eight fields the plan names: theme, custom accent, timer
+display mode, always-on-top, widget size preset, widget placement (position + monitor identity), stopped-close
+behaviour, and the storage folder. Launch-at-login and global shortcuts are explicitly out of scope for v1, and
+a reflection canary fails if a property resembling either appears.
+
+**The preference values come from the later phases, not from invention:** theme System/Light/Dark (6.2), timer
+display Elapsed or StartedTime (4.3 — "`Started h:mm tt` or elapsed duration"), size
+Compact/Comfortable/Expanded (4.3), close HideToTray or Exit (5.4 — "Stopped close immediately follows stored
+HideToTray/Exit behavior"). A drift canary pins the persisted key set.
+
+**Defaults are chosen to be unsurprising** — follow the system theme, show elapsed time, stay on top, hide to
+the tray on close — and Phase 4.3/5.4 can revisit them without touching the storage layer.
+
+**`StorageFolder` is null by default on purpose.** `null` means "wherever the app puts sessions by default",
+which only the persistence layer can resolve. Writing a resolved absolute path on first run would freeze
+today's default and stop it following a future change.
+
+**Enums are stored as names, not numbers.** A settings file a user can read is one they can fix, and
+reordering an enum cannot silently change what a stored value means.
+
+**A damaged preferences file falls back to defaults.** Preferences are a convenience; refusing to start over
+one is not a trade worth making. Unknown fields are ignored rather than treated as corruption, so a newer
+build's file does not reset an older build's user.
+
+**The migration deletes only after verifying.** Read the source, write the copy (never overwriting — the
+collision sequence applies), read the copy back, compare content, and only then delete the source. A source
+whose copy failed stays exactly where it was.
+
+**A partial failure keeps the OLD location.** The plan left this open, and the reasoning runs the other way
+from the obvious choice: switching the stored location after moving only some sessions would make the rest look
+deleted. The result reports what stayed, is marked retryable, and re-running the move finishes the job.
+
+**Content comparison, not byte comparison,** when verifying a moved copy. Re-serializing may legitimately
+differ in line endings; treating that as a failed move would split a user's data across two folders for no
+reason.
+
+**`AtomicFile` is now the single atomic-write implementation**, shared by the session store and the preferences
+store, rather than a second copy that could drift.
+
