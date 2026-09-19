@@ -352,3 +352,28 @@ durable UI-visible state, and the next flush retries. `FlushResult` separates `W
 **Shutdown forces a final flush.** `RunAsync` catches cancellation and flushes once more, which is what makes
 the last few seconds of tracked work durable. A clean session is not rewritten.
 
+## Task 2.3 — import, export and file naming (2026-09-18)
+
+**The slug rule is TTC's, character for character**, because the fixtures pin it: a name of
+`a:b*c?d<e>f|g/h\i` becomes `abcdefghi.json`, and a name made entirely of hostile characters becomes
+`session.json`. Spaces become dashes, the result is whitespace-trimmed, and a leading dash is **not**
+removed — TTC does not remove one either, and a slug that differs from TTC's is a file TTC will not find. The
+hostile set is the platform's invalid set unioned with the Windows set and the control characters, so a slug
+produced on Linux is the one Windows would produce.
+
+**The collision sequence is deliberately not TTC's:** `name.json`, `name-1.json`, `name-2.json`. TTC starts
+at `-2`; the plan settles `-1`-first as a desktop requirement.
+
+**User decision (2026-09-18): export never overwrites.** The plan settled the collision rule for import and
+said nothing about export. The same sequence now covers both directions, so an export cannot destroy a file
+that is already there — one rule instead of two.
+
+**Import never touches the source.** It is read, copied, and only the copy is renamed with ` (Imported)`. The
+test asserts the source's bytes are byte-for-byte unchanged afterwards, not merely that it still parses. The
+copy keeps the session id: it is the same session in a different place.
+
+**Export is a copy of the persisted session.** It marks dirty and flushes first, then reads the **file** —
+not a live object — and writes beside any existing file. Reading the file is what makes "source and target
+are independent" true by construction, and it is why exporting cannot stop a running entry or stamp the
+session as ended. A failed flush abandons the export rather than copying stale data.
+
