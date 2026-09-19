@@ -91,8 +91,9 @@ public partial class App : Application
     {
         _session = session;
 
-        // the widget surface is Task 4.2; until then the chosen session is reported rather than pretended
-        _window?.ReportStatus($"Session '{session.State.Name}' open. Widget surface arrives in Task 4.2.");
+        // the chooser has done its job: the widget takes over the surface
+        _window?.ShowWidget(session, _clock);
+        _window?.ReportStatus($"Session '{session.State.Name}' open.");
     }
 
     /// <summary>The tray's right-click menu.</summary>

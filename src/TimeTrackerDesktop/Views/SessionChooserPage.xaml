@@ -7,7 +7,11 @@
 
     <!-- Plan Task 4.1: a session must be chosen before the widget opens. Start New Session is the primary
          action and needs no name, so it is the accented button; Resume is only available once a row is
-         selected, which is what makes the disabled state meaningful rather than decorative. -->
+         selected, which is what makes the disabled state meaningful rather than decorative.
+
+         No explicit size here, deliberately: the window's size is set through the interop service, and a
+         Height on this root made the page taller than its host, which clipped the action row off the bottom
+         entirely. Measured - the window reported 460x620 while only the heading rendered. -->
     <Grid Padding="16" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

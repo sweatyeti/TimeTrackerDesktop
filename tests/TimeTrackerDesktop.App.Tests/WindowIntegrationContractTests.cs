@@ -132,6 +132,14 @@ public sealed class WindowIntegrationContractTests
             y = 0;
         }
 
+        public void GetWindowBounds(Window window, out int x, out int y, out int width, out int height)
+        {
+            x = 0;
+            y = 0;
+            width = 0;
+            height = 0;
+        }
+
         public void SetRoundedCorners(Window window, bool rounded)
         {
         }

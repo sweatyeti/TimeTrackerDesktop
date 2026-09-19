@@ -19,6 +19,7 @@ public sealed partial class MainWidgetWindow : Window
     private readonly IWindowInteropService _interop;
 
     private bool _dragging;
+    private DispatcherTimer? _tickTimer;
     private int _dragStartCursorX;
     private int _dragStartCursorY;
     private int _dragStartWindowX;
@@ -57,14 +58,117 @@ public sealed partial class MainWidgetWindow : Window
     /// <summary>Raised once the user has chosen a session in the chooser.</summary>
     public event EventHandler<SessionService>? SessionChosen;
 
-    /// <summary>Shows the session chooser. The widget surface is Task 4.2.</summary>
+    /// <summary>
+    /// The chooser needs room for its rows and buttons; the widget is a compact card. Both are set explicitly
+    /// because a borderless window with no requested size gets a default that clipped the chooser's buttons.
+    ///
+    /// The widget's height is measured, not chosen: its content - state line, started, elapsed, task field,
+    /// description field, then the button row - needs more than 260, and at 260 the tracking buttons were laid
+    /// out but pushed past the bottom edge, so the widget rendered as text with no controls at all.
+    /// </summary>
+    private static readonly global::Windows.Graphics.SizeInt32 ChooserSize = new(460, 620);
+
+    private static readonly global::Windows.Graphics.SizeInt32 WidgetSize = new(420, 430);
+
+    /// <summary>Shows the session chooser. The widget surface replaces it once a session is chosen.</summary>
     public void ShowChooser(SessionChooserViewModel viewModel)
     {
         SessionChooserPage page = new(viewModel);
 
         page.SessionChosen += (_, session) => SessionChosen?.Invoke(this, session);
 
+        // AppWindow.Resize, not SetWindowPos: a raw SetWindowPos changes the HWND but WinUI keeps its own
+        // notion of the size, so AppWindow reported 420x260 while the window was still 620 tall and the
+        // content stayed measured against the real one - which clipped the widget's button row. Measured.
+        AppWindow.Resize(ChooserSize);
         Host.Content = page;
+
+        WriteGeometryDiagnostic("immediately after ShowChooser");
+
+        // and again once the layout has settled: if WinUI applies its own size on a later pass, the two lines
+        // will disagree, which is the whole question
+        DispatcherTimer probe = new() { Interval = TimeSpan.FromSeconds(3) };
+        probe.Tick += (_, _) =>
+        {
+            probe.Stop();
+            WriteGeometryDiagnostic("3s after ShowChooser");
+        };
+        probe.Start();
+    }
+
+    /// <summary>
+    /// Writes the window's geometry to a file so it can be inspected from outside the session.
+    ///
+    /// Necessary because PowerShell over SSH runs in session 0 and reports <c>MainWindowHandle = 0</c> for a
+    /// window in session 1, so every geometry check from outside is blind. A diagnostic must come from in here.
+    /// </summary>
+    public void WriteGeometryDiagnostic(string stage)
+    {
+        try
+        {
+            _interop.GetWindowBounds(this, out int hwndX, out int hwndY, out int hwndWidth, out int hwndHeight);
+
+            string line =
+                $"{DateTimeOffset.Now:HH:mm:ss.fff} | {stage} | "
+                + $"position=({AppWindow.Position.X},{AppWindow.Position.Y}) "
+                + $"size=({AppWindow.Size.Width}x{AppWindow.Size.Height}) "
+                + $"hwnd=({hwndX},{hwndY} {hwndWidth}x{hwndHeight}) "
+                + $"host=({Host.ActualWidth}x{Host.ActualHeight}) "
+                + $"surface=({DragSurface.ActualWidth}x{DragSurface.ActualHeight}) "
+                + (Host.Content as Views.WidgetShell)?.DescribeButtons()
+                + $" res:key={Application.Current.Resources.ContainsKey("TrackingPlayBrush")}"
+                + $" lookup={(Application.Current.Resources.TryGetValue("TrackingPlayBrush", out object? brush) ? brush?.GetType().Name ?? "null" : "MISSING")}";
+
+            File.AppendAllText(
+                Path.Combine(Path.GetTempPath(), "ttd-window.txt"),
+                line + Environment.NewLine);
+        }
+        catch(IOException)
+        {
+            // a diagnostic must never be the reason the app fails
+        }
+    }
+
+    /// <summary>
+    /// Shows the widget for a chosen session (plan Task 4.2).
+    ///
+    /// The timer only refreshes the duration text: the elapsed time is always derived from the entry's
+    /// persisted start, so a missed tick, a suspended process or a hidden window cannot make it wrong.
+    /// </summary>
+    public void ShowWidget(SessionService session, IClock clock)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        WidgetShell shell = new(new WidgetViewModel(session, clock));
+
+        AppWindow.Resize(WidgetSize);
+
+        // The window resize does not re-measure an already-laid-out content root: the frame stayed 444x575
+        // inside a 420x260 window, which clipped the widget's button row. Sizing the root explicitly is what
+        // makes the card fill the window. Measured, with both AppWindow.Resize and SetWindowPos.
+        DragSurface.Width = WidgetSize.Width;
+        DragSurface.Height = WidgetSize.Height;
+
+        Host.Content = shell;
+        WriteGeometryDiagnostic("after ShowWidget");
+
+        // and again once the layout has settled: the line above fires before the pass that follows the resize,
+        // so it reports the previous size. This is the one that says whether the card actually fits.
+        DispatcherTimer settle = new() { Interval = TimeSpan.FromSeconds(3) };
+        settle.Tick += (_, _) =>
+        {
+            settle.Stop();
+            WriteGeometryDiagnostic("3s after ShowWidget");
+        };
+        settle.Start();
+
+        if(_tickTimer is null)
+        {
+            _tickTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _tickTimer.Tick += (_, _) => (Host.Content as WidgetShell)?.ViewModel.Tick();
+            _tickTimer.Start();
+        }
     }
 
     /// <summary>Shows and focuses the window, for the tray and single-instance paths.</summary>
