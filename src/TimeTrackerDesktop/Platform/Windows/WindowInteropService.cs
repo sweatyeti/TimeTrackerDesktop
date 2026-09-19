@@ -38,6 +38,12 @@ public interface IWindowInteropService
     /// <summary>Reads the cursor's absolute screen position.</summary>
     void GetCursorPosition(out int x, out int y);
 
+    /// <summary>
+    /// Reads the window's real rectangle from the OS. Distinct from <c>AppWindow.Size</c>, which is WinUI's
+    /// own model and can disagree with the actual window.
+    /// </summary>
+    void GetWindowBounds(Window window, out int x, out int y, out int width, out int height);
+
     /// <summary>Applies the Windows 11 corner preference.</summary>
     void SetRoundedCorners(Window window, bool rounded);
 
@@ -125,6 +131,21 @@ public sealed class WindowInteropService : IWindowInteropService
     private const int DWMWCP_DONOTROUND = 1;
 
     private const uint SWP_NOSIZE = 0x0001;
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(nint hWnd, out NativeRect rect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+
+        public int Top;
+
+        public int Right;
+
+        public int Bottom;
+    }
+
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
 
@@ -209,6 +230,26 @@ public sealed class WindowInteropService : IWindowInteropService
 
         x = point.X;
         y = point.Y;
+    }
+
+    public void GetWindowBounds(Window window, out int x, out int y, out int width, out int height)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        if(!GetWindowRect(HandleOf(window), out NativeRect rect))
+        {
+            x = 0;
+            y = 0;
+            width = 0;
+            height = 0;
+
+            return;
+        }
+
+        x = rect.Left;
+        y = rect.Top;
+        width = rect.Right - rect.Left;
+        height = rect.Bottom - rect.Top;
     }
 
     public void SetRoundedCorners(Window window, bool rounded)

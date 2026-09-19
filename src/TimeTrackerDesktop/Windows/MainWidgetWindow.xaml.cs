@@ -60,12 +60,15 @@ public sealed partial class MainWidgetWindow : Window
 
     /// <summary>
     /// The chooser needs room for its rows and buttons; the widget is a compact card. Both are set explicitly
-    /// because a borderless window with no requested size gets a default that clipped the chooser's buttons
-    /// off the bottom — measured, not assumed: the button text was absent from a screenshot of the running app.
+    /// because a borderless window with no requested size gets a default that clipped the chooser's buttons.
+    ///
+    /// The widget's height is measured, not chosen: its content - state line, started, elapsed, task field,
+    /// description field, then the button row - needs more than 260, and at 260 the tracking buttons were laid
+    /// out but pushed past the bottom edge, so the widget rendered as text with no controls at all.
     /// </summary>
     private static readonly global::Windows.Graphics.SizeInt32 ChooserSize = new(460, 620);
 
-    private static readonly global::Windows.Graphics.SizeInt32 WidgetSize = new(420, 260);
+    private static readonly global::Windows.Graphics.SizeInt32 WidgetSize = new(420, 430);
 
     /// <summary>Shows the session chooser. The widget surface replaces it once a session is chosen.</summary>
     public void ShowChooser(SessionChooserViewModel viewModel)
@@ -103,12 +106,18 @@ public sealed partial class MainWidgetWindow : Window
     {
         try
         {
+            _interop.GetWindowBounds(this, out int hwndX, out int hwndY, out int hwndWidth, out int hwndHeight);
+
             string line =
                 $"{DateTimeOffset.Now:HH:mm:ss.fff} | {stage} | "
                 + $"position=({AppWindow.Position.X},{AppWindow.Position.Y}) "
                 + $"size=({AppWindow.Size.Width}x{AppWindow.Size.Height}) "
+                + $"hwnd=({hwndX},{hwndY} {hwndWidth}x{hwndHeight}) "
                 + $"host=({Host.ActualWidth}x{Host.ActualHeight}) "
-                + $"surface=({DragSurface.ActualWidth}x{DragSurface.ActualHeight})";
+                + $"surface=({DragSurface.ActualWidth}x{DragSurface.ActualHeight}) "
+                + (Host.Content as Views.WidgetShell)?.DescribeButtons()
+                + $" res:key={Application.Current.Resources.ContainsKey("TrackingPlayBrush")}"
+                + $" lookup={(Application.Current.Resources.TryGetValue("TrackingPlayBrush", out object? brush) ? brush?.GetType().Name ?? "null" : "MISSING")}";
 
             File.AppendAllText(
                 Path.Combine(Path.GetTempPath(), "ttd-window.txt"),
@@ -143,6 +152,16 @@ public sealed partial class MainWidgetWindow : Window
 
         Host.Content = shell;
         WriteGeometryDiagnostic("after ShowWidget");
+
+        // and again once the layout has settled: the line above fires before the pass that follows the resize,
+        // so it reports the previous size. This is the one that says whether the card actually fits.
+        DispatcherTimer settle = new() { Interval = TimeSpan.FromSeconds(3) };
+        settle.Tick += (_, _) =>
+        {
+            settle.Stop();
+            WriteGeometryDiagnostic("3s after ShowWidget");
+        };
+        settle.Start();
 
         if(_tickTimer is null)
         {

@@ -5,15 +5,20 @@
 
     <!-- Widget colours (plan Task 4.2). Theme-aware rather than fixed, because the same green that reads as
          "go" on a light background is muddy on a dark one. These are the only colours the widget uses for
-         meaning, and they are always paired with wording or a distinct glyph shape - never colour alone. -->
+         meaning, and they are always paired with wording or a distinct glyph shape - never colour alone.
+
+         The glyph brushes carry the green/red, not the button background. Measured on Windows 11: setting the
+         button's Background to these brushes had no effect (the face stayed the default #FDFDFD), and with a
+         white glyph that made both tracking buttons completely invisible - laid out at 44x44, reporting
+         Visible, drawing nothing. Colouring the glyph against the default face is what actually shows. -->
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
             <SolidColorBrush x:Key="WidgetCardBrush" Color="#F7F7F7" />
             <SolidColorBrush x:Key="WidgetCardBorderBrush" Color="#E1E1E1" />
             <SolidColorBrush x:Key="TrackingPlayBrush" Color="#0F7B0F" />
-            <SolidColorBrush x:Key="TrackingPlayGlyphBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TrackingPlayGlyphBrush" Color="#0F7B0F" />
             <SolidColorBrush x:Key="TrackingStopBrush" Color="#C42B1C" />
-            <SolidColorBrush x:Key="TrackingStopGlyphBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TrackingStopGlyphBrush" Color="#C42B1C" />
             <SolidColorBrush x:Key="WidgetMutedBrush" Color="#5F5F5F" />
         </ResourceDictionary>
 
@@ -21,10 +26,20 @@
             <SolidColorBrush x:Key="WidgetCardBrush" Color="#1F1F1F" />
             <SolidColorBrush x:Key="WidgetCardBorderBrush" Color="#3A3A3A" />
             <SolidColorBrush x:Key="TrackingPlayBrush" Color="#2EA043" />
-            <SolidColorBrush x:Key="TrackingPlayGlyphBrush" Color="#0B0B0B" />
+            <SolidColorBrush x:Key="TrackingPlayGlyphBrush" Color="#2EA043" />
             <SolidColorBrush x:Key="TrackingStopBrush" Color="#E5484D" />
-            <SolidColorBrush x:Key="TrackingStopGlyphBrush" Color="#0B0B0B" />
+            <SolidColorBrush x:Key="TrackingStopGlyphBrush" Color="#E5484D" />
             <SolidColorBrush x:Key="WidgetMutedBrush" Color="#B4B4B4" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+
+    <!-- Base values, deliberately outside the theme dictionaries: a ThemeResource lookup falls back to these,
+         so the brushes always resolve whatever the theme key. -->
+    <SolidColorBrush x:Key="WidgetCardBrush" Color="#F7F7F7" />
+    <SolidColorBrush x:Key="WidgetCardBorderBrush" Color="#E1E1E1" />
+    <SolidColorBrush x:Key="TrackingPlayBrush" Color="#0F7B0F" />
+    <SolidColorBrush x:Key="TrackingPlayGlyphBrush" Color="#0F7B0F" />
+    <SolidColorBrush x:Key="TrackingStopBrush" Color="#C42B1C" />
+    <SolidColorBrush x:Key="TrackingStopGlyphBrush" Color="#C42B1C" />
+    <SolidColorBrush x:Key="WidgetMutedBrush" Color="#5F5F5F" />
 </ResourceDictionary>

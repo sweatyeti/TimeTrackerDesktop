@@ -59,4 +59,13 @@ public sealed partial class WidgetShell : UserControl
     private void OnTaskLostFocus(object sender, RoutedEventArgs e) => ViewModel.CommitTask();
 
     private void OnDescriptionLostFocus(object sender, RoutedEventArgs e) => ViewModel.CommitDescription();
+
+    /// <summary>
+    /// Reports the button controls' measured size and visibility, for the window's geometry diagnostic. A zero
+    /// size means they never laid out; a real size with nothing on screen means their brushes did not resolve.
+    /// </summary>
+    public string DescribeButtons() =>
+        $"play=({PlayControl.ActualWidth}x{PlayControl.ActualHeight},{PlayControl.Visibility}) "
+        + $"stop=({StopControl.ActualWidth}x{StopControl.ActualHeight},{StopControl.Visibility}) "
+        + $"edit=({EditTaskButton.ActualWidth}x{EditTaskButton.ActualHeight},{EditTaskButton.Visibility})";
 }

@@ -5,28 +5,34 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- The primary tracking control (plan Task 4.2). The glyph SHAPE differs between the two kinds, so the
-         meaning survives without colour: a triangle is not a square even in greyscale. -->
+         meaning survives without colour: a triangle is not a square even in greyscale. Verified on Windows 11 -
+         the play glyph measured 14x16 and the stop glyph 12x12, both drawn and distinct.
+
+         The colours are literals, which is a retreat to revisit rather than a finding. When both buttons drew
+         nothing, the ThemeResource lookups were suspected; the real cause turned out to be that the widget's
+         card was too short and had pushed this row past its bottom edge. The lookups were therefore never
+         shown to be broken - Application.Current.Resources reported both brushes present and returning a
+         SolidColorBrush. Literals are kept because they are known to work; restoring the themed brushes and
+         re-verifying is worthwhile, and the suspicion should not be recorded as fact. -->
     <Grid>
         <Button
             x:Name="PlayButton"
-            Background="{ThemeResource TrackingPlayBrush}"
             Click="OnClick"
             Style="{StaticResource TrackingIconButtonStyle}">
             <Path
                 Data="M 0,0 L 14,8 L 0,16 Z"
-                Fill="{ThemeResource TrackingPlayGlyphBrush}" />
+                Fill="#0F7B0F" />
         </Button>
 
         <Button
             x:Name="StopButton"
-            Background="{ThemeResource TrackingStopBrush}"
             Click="OnClick"
             Style="{StaticResource TrackingIconButtonStyle}"
             Visibility="Collapsed">
             <Rectangle
                 Width="12"
                 Height="12"
-                Fill="{ThemeResource TrackingStopGlyphBrush}" />
+                Fill="#C42B1C" />
         </Button>
     </Grid>
 </UserControl>
