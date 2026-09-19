@@ -6,18 +6,20 @@ using TimeTrackerDesktop.Domain;
 namespace TimeTrackerDesktop.ViewModels;
 
 /// <summary>
-/// The compact widget (plan Task 4.2): an active state with the task, description and primary commands, and
-/// an idle state that says so.
+/// The compact widget (plan Tasks 4.2 and 4.3): an active state with the task, description and primary
+/// commands, an idle state that says so, and a timer whose presentation follows the user's preferences.
 ///
-/// Two rules from the plan shape everything here:
+/// The rules with teeth:
 ///
 /// - <b>Commands bind to the <see cref="SessionService"/> and nothing else.</b> The widget never edits session
 ///   state directly, so the domain's invariants hold no matter which surface is driving.
 /// - <b>Colour is never the only signal.</b> Active and idle differ by wording (<see cref="StateLabel"/>),
 ///   by which controls exist at all, and by accessible names and tooltips — not by a green dot.
-///
-/// Play uses the exact restart semantics (decision 4): it completes the running entry and opens a new one, and
-/// from idle it simply starts. Stop only stops. Neither is an alias for the other.
+/// - <b>Play uses the exact restart semantics</b> (decision 4): it completes the running entry and opens a new
+///   one, and from idle it simply starts. Stop only stops. Neither is an alias for the other.
+/// - <b>The clock drives the display, and only the display.</b> <see cref="Tick"/> re-reads the clock; it never
+///   restamps the entry, because a tick that moved the start time would rewrite the user's recorded work every
+///   second. See <see cref="TimerText"/>.
 /// </summary>
 public sealed class WidgetViewModel : INotifyPropertyChanged
 {
@@ -27,21 +29,37 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     /// <summary>Shown in the task position while active but with no task set.</summary>
     public const string NoTaskText = "No task";
 
+    /// <summary>
+    /// The shortest the card may be before its own controls start falling off it.
+    ///
+    /// This is the plan's "explicit minimum" (Task 4.3). A preset states a height, but the content has the
+    /// last word: at 260px the widget's button row was pushed clean past the bottom edge and rendered nothing,
+    /// while still measuring 44x44 and reporting <c>Visible</c>. 300 is the height at which the full control set
+    /// was observed to fit; verification raises this number if that turns out to be wrong, rather than letting a
+    /// preset clip silently.
+    /// </summary>
+    public const int MinimumContentHeight = 300;
+
+    private static readonly UserPreferences FallbackPreferences = UserPreferences.Default;
+
     private readonly SessionService _session;
     private readonly IClock _clock;
+
+    private UserPreferences _preferences;
 
     private string _taskText = string.Empty;
     private string _descriptionText = string.Empty;
     private string _message = string.Empty;
     private bool _isEditingTask;
 
-    public WidgetViewModel(SessionService session, IClock clock)
+    public WidgetViewModel(SessionService session, IClock clock, UserPreferences? preferences = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(clock);
 
         _session = session;
         _clock = clock;
+        _preferences = preferences ?? FallbackPreferences;
 
         PlayCommand = new RelayCommand(Play);
         StopCommand = new RelayCommand(Stop, () => CanStop);
@@ -62,6 +80,22 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     public ICommand EditTaskCommand { get; }
 
     public SessionService Session => _session;
+
+    /// <summary>
+    /// The preferences in force. Settable because a change is applied to the running widget rather than only
+    /// taking effect on the next launch — persistence and application are Task 4.3; the editing surface is 4.4.
+    /// </summary>
+    public UserPreferences Preferences
+    {
+        get => _preferences;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+
+            _preferences = value;
+            RaisePresentation();
+        }
+    }
 
     /// <summary>True while an entry is open.</summary>
     public bool IsActive => _session.State.IsActive;
@@ -121,6 +155,46 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     /// <summary>The duration rounded to the minute, for places that want a stable number.</summary>
     public string ElapsedRoundedDisplay =>
         _session.State.ActiveEntry is { } entry ? TimeDisplay.Format(_clock.Now - entry.StartTime) : string.Empty;
+
+    /// <summary>
+    /// The timer line (plan Task 4.3). The preference chooses which half is shown — either the ticking
+    /// duration or the start time — and the other half moves to <see cref="TimerTooltip"/>, so the choice is
+    /// one of emphasis rather than of losing the information.
+    /// </summary>
+    public string TimerText => IsActive
+        ? _preferences.TimerDisplay is TimerDisplayMode.StartedTime ? StartedDisplay : ElapsedDisplay
+        : string.Empty;
+
+    /// <summary>The half of the timer that <see cref="TimerText"/> is not showing, worded so it reads alone.</summary>
+    public string TimerTooltip => IsActive
+        ? _preferences.TimerDisplay is TimerDisplayMode.StartedTime
+            ? $"Running for {ElapsedDisplay}"
+            : StartedDisplay
+        : string.Empty;
+
+    /// <summary>The card's width for the chosen preset.</summary>
+    public int WidgetWidth => _preferences.WidgetSize switch
+    {
+        WidgetSizePreset.Compact => 380,
+        WidgetSizePreset.Expanded => 520,
+        _ => 420,
+    };
+
+    /// <summary>
+    /// The card's height for the chosen preset, never below <see cref="MinimumContentHeight"/>. A preset is a
+    /// preference; fitting its own controls is not optional.
+    /// </summary>
+    public int WidgetHeight => Math.Max(
+        _preferences.WidgetSize switch
+        {
+            WidgetSizePreset.Compact => 300,
+            WidgetSizePreset.Expanded => 560,
+            _ => 430,
+        },
+        MinimumContentHeight);
+
+    /// <summary>Whether the widget asks to stay above other windows (default true in the first-run preferences).</summary>
+    public bool AlwaysOnTop => _preferences.AlwaysOnTop;
 
     /// <summary>What just happened, for a status line or a screen reader.</summary>
     public string Message
@@ -199,12 +273,15 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// Re-reads the clock for the duration display. The UI calls this on a timer; the elapsed time is always
-    /// derived from the entry's persisted start, so a missed tick or a suspended process cannot drift it.
+    /// derived from the entry's persisted start, so a missed tick or a suspended process cannot drift it — and
+    /// nothing here writes to the session, so a tick can never move the recorded start time.
     /// </summary>
     public void Tick()
     {
         OnPropertyChanged(nameof(ElapsedDisplay));
         OnPropertyChanged(nameof(ElapsedRoundedDisplay));
+        OnPropertyChanged(nameof(TimerText));
+        OnPropertyChanged(nameof(TimerTooltip));
     }
 
     /// <summary>Pulls every display value back into line with the session.</summary>
@@ -234,8 +311,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(PlayAccessibleName));
         OnPropertyChanged(nameof(PlayTooltip));
 
-        (StopCommand as RelayCommand)?.RaiseCanExecuteChanged();
-        (EditTaskCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        RaisePresentation();
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -247,6 +323,20 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
 
         field = value;
         OnPropertyChanged(propertyName);
+    }
+
+    /// <summary>Announces everything that follows from the preferences or the clock.</summary>
+    private void RaisePresentation()
+    {
+        OnPropertyChanged(nameof(Preferences));
+        OnPropertyChanged(nameof(TimerText));
+        OnPropertyChanged(nameof(TimerTooltip));
+        OnPropertyChanged(nameof(WidgetWidth));
+        OnPropertyChanged(nameof(WidgetHeight));
+        OnPropertyChanged(nameof(AlwaysOnTop));
+
+        (StopCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        (EditTaskCommand as RelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>

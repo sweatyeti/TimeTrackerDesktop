@@ -331,9 +331,133 @@ public sealed class WidgetViewModelTests
         Assert.Equal("No task running", idle.StateLabel);
     }
 
+    // ------------------------------------------------------------------ timer display (Task 4.3)
+
+    private static WidgetViewModel WidgetWith(UserPreferences preferences, out SessionService session)
+    {
+        session = SessionService.StartNewSession(new FixedClock(Nine), "test session");
+        session.UpdateActiveEntry(new EntryEdit(Task: "weeding"));
+
+        return new WidgetViewModel(session, new FixedClock(Nine.AddMinutes(65)), preferences);
+    }
+
+    [Fact]
+    public void Elapsed_mode_shows_a_ticking_duration_and_keeps_the_start_time_in_the_tooltip()
+    {
+        WidgetViewModel widget = WidgetWith(
+            UserPreferences.Default with { TimerDisplay = TimerDisplayMode.Elapsed }, out _);
+
+        Assert.Equal("1:05:00", widget.TimerText);
+        Assert.Contains("9:00 AM", widget.TimerTooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartedTime_mode_shows_the_start_time_and_keeps_the_duration_in_the_tooltip()
+    {
+        WidgetViewModel widget = WidgetWith(
+            UserPreferences.Default with { TimerDisplay = TimerDisplayMode.StartedTime }, out _);
+
+        Assert.Equal("Started 9:00 AM", widget.TimerText);
+        Assert.Contains("1:05:00", widget.TimerTooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_hidden_half_of_the_timer_stays_reachable_as_text()
+    {
+        // the preference chooses what is emphasised, not what exists: whichever half is not on the face is
+        // still spelled out in the tooltip, so the timer never loses information silently
+        WidgetViewModel elapsed = WidgetWith(
+            UserPreferences.Default with { TimerDisplay = TimerDisplayMode.Elapsed }, out _);
+
+        WidgetViewModel started = WidgetWith(
+            UserPreferences.Default with { TimerDisplay = TimerDisplayMode.StartedTime }, out _);
+
+        Assert.NotEqual(elapsed.TimerText, started.TimerText);
+        Assert.NotEqual(elapsed.TimerTooltip, started.TimerTooltip);
+        Assert.False(string.IsNullOrWhiteSpace(elapsed.TimerTooltip));
+        Assert.False(string.IsNullOrWhiteSpace(started.TimerTooltip));
+    }
+
+    [Fact]
+    public void Ticking_refreshes_the_timer_without_moving_the_persisted_start()
+    {
+        // the plan's rule with teeth: the clock drives the display, and only the display. A tick that
+        // restamped the entry would rewrite the user's recorded work every second.
+        SessionService session = SessionService.StartNewSession(new FixedClock(Nine), "test session");
+
+        MutableClock clock = new(Nine.AddMinutes(5));
+
+        WidgetViewModel widget = new(
+            session, clock, UserPreferences.Default with { TimerDisplay = TimerDisplayMode.Elapsed });
+
+        DateTimeOffset persistedStart = session.State.ActiveEntry!.StartTime;
+        DateTimeOffset persistedNow = session.State.ActiveEntry!.StartTime;
+        string before = widget.TimerText;
+
+        clock.Now = Nine.AddMinutes(6);
+        widget.Tick();
+
+        Assert.Equal("0:05:00", before);
+        Assert.Equal("0:06:00", widget.TimerText);
+        Assert.Equal(persistedStart, session.State.ActiveEntry!.StartTime);
+        Assert.Equal(persistedNow, session.State.ActiveEntry!.StartTime);
+        Assert.Single(session.State.Entries);
+    }
+
+    [Fact]
+    public void Idle_shows_no_timer_at_all()
+    {
+        WidgetViewModel widget = IdleWidget(out _);
+
+        Assert.Equal(string.Empty, widget.TimerText);
+        Assert.Equal(string.Empty, widget.TimerTooltip);
+    }
+
+    // ------------------------------------------------------------------ size and topmost (Task 4.3)
+
+    [Theory]
+    [InlineData(WidgetSizePreset.Compact, 380)]
+    [InlineData(WidgetSizePreset.Comfortable, 420)]
+    [InlineData(WidgetSizePreset.Expanded, 520)]
+    public void Each_size_preset_has_the_agreed_width(WidgetSizePreset preset, int width)
+    {
+        WidgetViewModel widget = WidgetWith(UserPreferences.Default with { WidgetSize = preset }, out _);
+
+        Assert.Equal(width, widget.WidgetWidth);
+    }
+
+    [Fact]
+    public void No_preset_can_be_shorter_than_the_content_needs()
+    {
+        // the plan's explicit minimum. Presets state a height, but the content has the last word - at 260 the
+        // widget's button row was pushed clean off the card, which is exactly what this guards.
+        foreach(WidgetSizePreset preset in Enum.GetValues<WidgetSizePreset>())
+        {
+            WidgetViewModel widget = WidgetWith(UserPreferences.Default with { WidgetSize = preset }, out _);
+
+            Assert.True(
+                widget.WidgetHeight >= WidgetViewModel.MinimumContentHeight,
+                $"{preset} is {widget.WidgetHeight}px tall, below the "
+                + $"{WidgetViewModel.MinimumContentHeight}px content minimum");
+        }
+    }
+
+    [Fact]
+    public void Always_on_top_follows_the_preference()
+    {
+        Assert.True(WidgetWith(UserPreferences.Default with { AlwaysOnTop = true }, out _).AlwaysOnTop);
+        Assert.False(WidgetWith(UserPreferences.Default with { AlwaysOnTop = false }, out _).AlwaysOnTop);
+    }
+
     /// <summary>A clock that does not move, so assertions are about behaviour rather than the wall.</summary>
     private sealed class FixedClock(DateTimeOffset now) : IClock
     {
         public DateTimeOffset Now { get; } = now;
+    }
+
+    /// <summary>A clock whose reading the test moves by hand, for the tick rules.</summary>
+    private sealed class MutableClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset Now { get; set; } = now;
     }
 }
