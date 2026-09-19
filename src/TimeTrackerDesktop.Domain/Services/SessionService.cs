@@ -188,33 +188,108 @@ public sealed class SessionService
             : new EntryEditResult(State, EntryEditOutcome.NoActiveEntry);
     }
 
-    /// <summary>Soft-deletes a completed entry. Open entries are not deletable.</summary>
-    public void Delete(int id)
+    /// <summary>
+    /// <b>Delete</b> (soft): flags a completed, non-deleted entry as deleted. The entry stays in the
+    /// snapshot and stays restorable (invariant 7) — this never destroys recorded work.
+    ///
+    /// TTC's <c>IsDeletableEntry</c> is the rule: completed and not already deleted. An in-progress
+    /// entry cannot be deleted, because it is still being tracked.
+    /// </summary>
+    public EntryVisibilityResult Delete(int id)
     {
-        TimeEntry entry = Find(id);
+        TimeEntry? entry = State.Entries.SingleOrDefault(existing => existing.Id == id);
 
-        if(entry.IsComplete && !entry.IsDeleted) Replace(entry with { IsDeleted = true });
-    }
+        if(entry is null)
+        {
+            return new EntryVisibilityResult(State, EntryVisibilityOutcome.EntryNotFound);
+        }
 
-    public void Restore(int id)
-    {
-        TimeEntry entry = Find(id);
+        if(!entry.IsComplete || entry.IsDeleted)
+        {
+            return new EntryVisibilityResult(State, EntryVisibilityOutcome.NotDeletable, entry);
+        }
 
-        if(entry.IsDeleted) Replace(entry with { IsDeleted = false });
+        TimeEntry deleted = entry with { IsDeleted = true };
+        Replace(deleted);
+
+        return new EntryVisibilityResult(State, EntryVisibilityOutcome.Deleted, deleted);
     }
 
     /// <summary>
-    /// Completed, undeleted, non-"none" time grouped by task, case-insensitively. Phase 1 Task 1.4
-    /// owns the real projections; this stays as the bootstrap left it.
+    /// <b>Restore</b>: reverses only <c>IsDeleted</c>. Times, task, description and logged state are
+    /// left exactly as they were, so restoring cannot silently alter recorded work.
     /// </summary>
-    public IReadOnlyDictionary<string, TimeSpan> Summary() =>
-        State.Entries
-            .Where(entry => entry.IsComplete && !entry.IsDeleted && !entry.HasNoTask && entry.Duration is not null)
-            .GroupBy(entry => entry.Task, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.First().Task,
-                group => TimeSpan.FromTicks(group.Sum(entry => entry.Duration!.Value.Ticks)),
-                StringComparer.OrdinalIgnoreCase);
+    public EntryVisibilityResult Restore(int id)
+    {
+        TimeEntry? entry = State.Entries.SingleOrDefault(existing => existing.Id == id);
+
+        if(entry is null)
+        {
+            return new EntryVisibilityResult(State, EntryVisibilityOutcome.EntryNotFound);
+        }
+
+        if(!entry.IsDeleted)
+        {
+            return new EntryVisibilityResult(State, EntryVisibilityOutcome.NotDeleted, entry);
+        }
+
+        TimeEntry restored = entry with { IsDeleted = false };
+        Replace(restored);
+
+        return new EntryVisibilityResult(State, EntryVisibilityOutcome.Restored, restored);
+    }
+
+    /// <summary>
+    /// <b>Log group</b>: marks every completed, named, non-deleted entry in the task group as logged,
+    /// matching case-insensitively — TTC's <c>ApplyLogTaskGroup</c>. Running entries are skipped (they
+    /// have no logged state yet), deleted entries are not live work, and untracked time is never a
+    /// group.
+    ///
+    /// The ids logged by this call are returned, because a bare "did anything happen" cannot tell an
+    /// unknown group from one that was already logged.
+    /// </summary>
+    public LogGroupResult LogTaskGroup(string? taskGroup)
+    {
+        string trimmed = (taskGroup ?? string.Empty).Trim();
+
+        // TTC returns false for an empty group name rather than logging every blank task
+        if(string.IsNullOrEmpty(trimmed))
+        {
+            return new LogGroupResult(State, taskGroup, []);
+        }
+
+        List<TimeEntry> entries = [.. State.Entries];
+        List<int> logged = [];
+
+        for(int index = 0; index < entries.Count; index++)
+        {
+            TimeEntry entry = entries[index];
+
+            if(entry.IsEditable
+               && entry.CanHoldLoggedState
+               && !entry.Logged
+               && entry.Task.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                entries[index] = entry.WithLogged(true);
+                logged.Add(entry.Id);
+            }
+        }
+
+        if(logged.Count == 0)
+        {
+            return new LogGroupResult(State, taskGroup, []);
+        }
+
+        State = State with { Entries = entries };
+
+        return new LogGroupResult(State, taskGroup, logged);
+    }
+
+    // The bootstrap Summary() dictionary used to live here. Task 1.4 replaced it with
+    // SummaryProjection.From(state) / TaskGroupProjection.Rows(state): the projections apply TTC's
+    // real rules (per-entry ceiling, untracked rows excluded from named totals) and live outside the
+    // service so a panel can render them without a mutation surface. Nothing referenced it, so it is
+    // gone rather than left as a second, subtly different answer to the same question.
 
     /// <summary>
     /// The one place an entry is opened: completes whatever is running, then adds a new entry at the
@@ -242,8 +317,6 @@ public sealed class SessionService
 
         return new SessionResult(State, change, opened);
     }
-
-    private TimeEntry Find(int id) => State.Entries.Single(entry => entry.Id == id);
 
     private void Replace(TimeEntry entry)
     {

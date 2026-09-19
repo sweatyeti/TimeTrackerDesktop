@@ -205,3 +205,46 @@ express any of that.
 placeholders whose result contracts this task owns; leaving them beside `UpdateEntry` would have given
 the same field two write paths with two chances to disagree.
 
+**Confirmed 2026-09-18:** the blank-task rule stands as the plan states it — a blank task edit writes
+`none`. Literal TTC parity (trim only, which can create a `""` task group) was offered and declined,
+so it should not be "fixed" back later.
+
+## Task 1.4 — deletion, restore, grouping and Log Group (2026-09-18)
+
+**Projections live outside the service.** `Projections/TaskGroupProjection.cs` and
+`Projections/SummaryProjection.cs` are pure functions over a snapshot: no clock, no disk, no XAML, no
+mutation surface. A panel renders them and cannot change state while doing so.
+
+**`SessionSummary` vs `SummaryProjection`:** the factory class keeps the plan's name; the record it
+returns is `SessionSummary`, because a record and a static class cannot share a name.
+
+**Durations round per entry, then sum — TTC's rule.** TTC computes
+`Math.Ceiling((EndTime - StartTime).TotalMinutes)` for each entry and sums those results. Two
+30-second entries therefore total **2 minutes**, not the 1 minute that rounding the summed duration
+would give. A test pins this, because "round the total" is the natural thing to write and it would
+disagree with the console by up to a minute per entry.
+
+**Untracked time gets a row but never a total.** TTC's issue #15: the `none` group is displayed and
+excluded from the named totals. An empty-string task — reachable only from a TTC file, since TTC's
+update path trims without mapping blank to `none` — is treated the same way for totals, and groups
+separately from `none`, as TTC does, because they are different task strings.
+
+**Canonical spelling: the plan's rule, not TTC's algorithm.** TTC groups on `entry.Task.ToLower()` and
+displays that lowercased key, so work typed `Client Work` is shown as `client work`; the row order
+depends on `Dictionary` enumeration, which v1's hard deletes could perturb. The plan's Q2 settles on
+the first non-empty original spelling by start time then id — readable and deterministic.
+
+**Log Group returns the ids it logged.** TTC's `ApplyLogTaskGroup` returns a bare `bool`, which cannot
+distinguish an unknown group from one that was already logged. An empty id list means nothing needed
+logging.
+
+**A bug the tests caught:** the first `LogTaskGroup` checked `CanHoldLoggedState` (completed and
+named) but not `!IsDeleted`, so a deleted entry with a matching task would have been logged. TTC's own
+filter checks `!entry.IsDeleted`; the test asserted it and failed, so the rule now matches.
+
+**Delete and restore return `EntryVisibilityResult`** with named refusals (`NotDeletable`,
+`NotDeleted`, `EntryNotFound`) instead of the previous silent `void` no-ops.
+
+**Removed:** the bootstrap `Summary()` dictionary. Nothing referenced it and it applied none of TTC's
+rounding or untracked rules — a second, subtly different answer to the same question.
+
