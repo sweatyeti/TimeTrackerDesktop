@@ -418,3 +418,62 @@ reason.
 **`AtomicFile` is now the single atomic-write implementation**, shared by the session store and the preferences
 store, rather than a second copy that could drift.
 
+## Task 3.1 — Windows 11 integration spike: APIs chosen, gate NOT yet passed (2026-09-18)
+
+**Chosen interop APIs** (all unpackaged, no package identity, no MSIX):
+
+- **Borderless chrome:** `OverlappedPresenter.SetBorderAndTitleBar(hasBorder: false, hasTitleBar: false)` via
+  `Window.AppWindow.Presenter`, plus `Window.ExtendsContentIntoTitleBar = true`. This is the Windows App SDK
+  route; manipulating `WS_CAPTION`/`WS_THICKFRAME` with `SetWindowLong` would fight the presenter.
+- **Rounded corners:** `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)`. Windows 11 only;
+  the call returns `E_INVALIDARG` on Windows 10, which is ignored deliberately — the window still works, it is
+  simply square.
+- **Dark window attribute:** `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE, 1)`.
+- **Drag:** `ReleaseCapture()` then `SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)` — the classic
+  non-client drag, which is why the drag surface needs a non-null `Background` (a surface with no background
+  does not hit-test and the window becomes immovable).
+- **Topmost:** `SetWindowPos(hwnd, HWND_TOPMOST/HWND_NOTOPMOST, …, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)`,
+  read back with `GetWindowLong(GWL_EXSTYLE) & WS_EX_TOPMOST`. Chosen over the presenter's `IsAlwaysOnTop`
+  precisely so the getter and the setter cannot disagree.
+- **Tray icon:** `Shell_NotifyIcon` (`NIM_ADD`/`NIM_MODIFY`/`NIM_DELETE`) with the window procedure subclassed
+  through `SetWindowLongPtr(GWLP_WNDPROC)` to receive `WM_APP + 1`. No third-party icon package: a library
+  would hide the constraints this spike exists to find.
+- **One instance:** a per-session named mutex (`Local\…Mutex`) for "am I first" plus a named auto-reset event
+  (`Local\…Show`) that a second launch sets. `Local\` rather than `Global\` so two users logged in at once each
+  get their own widget instead of one user's launch surfacing another's window.
+- **Package capabilities:** none required. Unpackaged execution means no `runFullTrust`-style declarations and
+  no MSIX — which is also why `AppInstance`-based activation redirection was not used.
+
+**A bug found while wiring, worth keeping:** `PointerRoutedEventArgs.OriginalSource` is the *innermost*
+element, so a press on a button arrives as the `TextBlock` inside it. Classifying only the source would let
+every button press start a window drag — the exact failure the spike's second check exists to catch. The
+implementation now walks **up** the visual tree from the original source.
+
+**Verification state — ALL FIVE CHECKS PASS; the gate is closed.** Full evidence is in `docs/UX-STATES.md`.
+Established:
+
+- The solution builds on Windows: **0 warnings / 0 errors**, **227/227** tests (App 18, Domain 84,
+  Persistence 125).
+- The 17 contract tests pass, including the drag-surface policy and the base-chain walk.
+- **Check 1 pass** — borderless window, dragged from (149,302) to (424,527).
+- **Check 2 pass** — `abc123` typed into the text box landed intact; the button toggled; the window never moved.
+- **Check 3 pass** — `Topmost requested: False; window reports: False`, then `True; True`.
+- **Check 4 pass** — `Tray: left click received` and `Tray: right click received`, with the right-click menu
+  showing **Show widget**.
+- **Check 5 pass** — a second launch left exactly one process running.
+
+**The drag constraint, found by measurement.** The first implementation used `ReleaseCapture()` +
+`SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`. It does nothing here, for a structural reason: `HTCAPTION` names a
+non-client *caption area*, and `OverlappedPresenter.SetBorderAndTitleBar(false, false)` removes exactly that. The
+drag was performed and the window did not move. The fix keeps the borderless design — the plan forbids falling
+back to conventional chrome — and drags by hand: capture the pointer, remember the cursor's screen position and
+the window's, then `AppWindow.Move` as it moves. Re-measured: the window moved. `BeginDrag` and the
+`WM_NCLBUTTONDOWN`/`HTCAPTION` machinery were deleted rather than left in place as dead, known-broken code.
+
+**Also measured:** a widget launched by the Task Scheduler cannot take the foreground and a borderless window is
+not an Alt+Tab candidate, so it cannot be raised that way; and the widget must set topmost at startup, because
+its default preference is always-on-top and a HUD that opens behind other windows is not doing its job.
+
+**Consequence:** the spike is still not merged. The plan's gate says detached windows and visual polish do not
+begin until all five checks pass, and check 4's callbacks are outstanding.
+

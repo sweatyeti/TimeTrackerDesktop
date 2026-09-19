@@ -5,14 +5,24 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="TimeTrackerDesktop">
 
-    <!-- Phase 0 placeholder surface. The borderless widget, right-side panel and tray integration
-         are Phase 3 work behind the integration-spike gate; nothing here should be mistaken for the
-         final shell. -->
-    <Grid Padding="24">
-        <TextBlock
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            Style="{StaticResource TitleTextBlockStyle}"
-            Text="TimeTrackerDesktop" />
+    <!-- Phase 3 integration spike surface. This is NOT the widget: it exists to prove, on real Windows 11,
+         that a borderless rounded window can be dragged from its own surface while a text box and a button
+         keep normal interaction, and that topmost can be read back after being set. The real shell is
+         Phase 4/5 work, gated behind this spike.
+
+         The Background is not decoration: with the system border and title bar removed, a surface with no
+         background does not hit-test, and the window becomes immovable. -->
+    <Grid
+        x:Name="DragSurface"
+        Padding="16"
+        Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <StackPanel VerticalAlignment="Center" Spacing="10">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Integration spike" />
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
+
+            <TextBox x:Name="ProbeText" Header="Type here - a press here must NOT drag the window" />
+            <Button x:Name="ProbeButton" Content="Click me - must NOT drag the window" />
+            <ToggleButton x:Name="TopmostToggle" Content="Always on top" />
+        </StackPanel>
     </Grid>
 </Window>
