@@ -426,20 +426,64 @@ public sealed class WidgetViewModelTests
         Assert.Equal(width, widget.WidgetWidth);
     }
 
-    [Fact]
-    public void No_preset_can_be_shorter_than_the_content_needs()
+    [Theory]
+    [InlineData(WidgetSizePreset.Compact, 300)]
+    [InlineData(WidgetSizePreset.Comfortable, 430)]
+    [InlineData(WidgetSizePreset.Expanded, 560)]
+    public void Each_size_preset_has_the_agreed_height_at_100_percent(WidgetSizePreset preset, int height)
     {
-        // the plan's explicit minimum. Presets state a height, but the content has the last word - at 260 the
-        // widget's button row was pushed clean off the card, which is exactly what this guards.
+        WidgetViewModel widget = WidgetWith(UserPreferences.Default with { WidgetSize = preset }, out _);
+
+        Assert.Equal(height, widget.WidgetHeight);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.5)]
+    [InlineData(2.25)]
+    public void No_preset_can_be_shorter_than_the_content_needs_at_any_text_scaling(double textScale)
+    {
+        // The plan's explicit minimum. It cannot be a fixed number: measured on Windows 11, Compact at 380x300
+        // rendered fully at 100% and clipped its button row clean off the card at 150%, while the controls still
+        // measured 44x44 and still reported Visible.
         foreach(WidgetSizePreset preset in Enum.GetValues<WidgetSizePreset>())
         {
             WidgetViewModel widget = WidgetWith(UserPreferences.Default with { WidgetSize = preset }, out _);
+            widget.TextScale = textScale;
 
             Assert.True(
-                widget.WidgetHeight >= WidgetViewModel.MinimumContentHeight,
-                $"{preset} is {widget.WidgetHeight}px tall, below the "
-                + $"{WidgetViewModel.MinimumContentHeight}px content minimum");
+                widget.WidgetHeight >= WidgetViewModel.MinimumContentHeightFor(textScale),
+                $"{preset} at {textScale:P0} is {widget.WidgetHeight}px, below the "
+                + $"{WidgetViewModel.MinimumContentHeightFor(textScale)}px content minimum");
         }
+    }
+
+    [Fact]
+    public void Text_scaling_raises_compact_above_its_nominal_preset()
+    {
+        // the preset states an intent; the content decides. At 150% the height has to grow past 300.
+        WidgetViewModel widget = WidgetWith(
+            UserPreferences.Default with { WidgetSize = WidgetSizePreset.Compact }, out _);
+
+        Assert.Equal(300, widget.WidgetHeight);
+
+        widget.TextScale = 1.5;
+
+        Assert.Equal(450, widget.WidgetHeight);
+        Assert.Equal(380, widget.WidgetWidth);
+    }
+
+    [Fact]
+    public void The_content_minimum_grows_with_text_scaling_and_never_shrinks_below_100_percent()
+    {
+        Assert.Equal(300, WidgetViewModel.MinimumContentHeightFor(1.0));
+        Assert.True(WidgetViewModel.MinimumContentHeightFor(1.5) > 300);
+        Assert.True(
+            WidgetViewModel.MinimumContentHeightFor(2.25) > WidgetViewModel.MinimumContentHeightFor(1.5));
+
+        // text smaller than 100% does not make the card's controls any shorter
+        Assert.Equal(300, WidgetViewModel.MinimumContentHeightFor(0.5));
+        Assert.Equal(300, WidgetViewModel.MinimumContentHeightFor(0.0));
     }
 
     [Fact]

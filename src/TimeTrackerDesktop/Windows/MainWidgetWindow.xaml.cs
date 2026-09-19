@@ -142,6 +142,12 @@ public sealed partial class MainWidgetWindow : Window
         ArgumentNullException.ThrowIfNull(preferences);
 
         WidgetViewModel viewModel = new(session, clock, preferences);
+
+        // Text scaling is a UI concern, so it is read here and handed over as a plain number: a view model that
+        // referenced a WinUI type would stop being testable without a UI thread. Measured: at 150% the card at
+        // its nominal preset height clipped the button row, so the view model has to know the scaling.
+        viewModel.TextScale = new global::Windows.UI.ViewManagement.UISettings().TextScaleFactor;
+
         WidgetShell shell = new(viewModel);
 
         global::Windows.Graphics.SizeInt32 size = new(viewModel.WidgetWidth, viewModel.WidgetHeight);

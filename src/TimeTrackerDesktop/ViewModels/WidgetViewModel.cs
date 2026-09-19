@@ -30,13 +30,13 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     public const string NoTaskText = "No task";
 
     /// <summary>
-    /// The shortest the card may be before its own controls start falling off it.
+    /// The shortest the card may be before its own controls start falling off it, <b>at 100% text scaling</b>.
     ///
-    /// This is the plan's "explicit minimum" (Task 4.3). A preset states a height, but the content has the
-    /// last word: at 260px the widget's button row was pushed clean past the bottom edge and rendered nothing,
-    /// while still measuring 44x44 and reporting <c>Visible</c>. 300 is the height at which the full control set
-    /// was observed to fit; verification raises this number if that turns out to be wrong, rather than letting a
-    /// preset clip silently.
+    /// This is the plan's "explicit minimum" (Task 4.3), and it is a CONTENT requirement: a preset states a
+    /// height, but the content has the last word. At 260px the widget's button row was pushed clean past the
+    /// bottom edge and rendered nothing while still measuring 44x44 and reporting <c>Visible</c>, and at 150%
+    /// text scaling the same thing happened again at 300px. Use <see cref="MinimumContentHeightFor"/> rather
+    /// than this constant directly — the minimum grows with the user's text size.
     /// </summary>
     public const int MinimumContentHeight = 300;
 
@@ -46,6 +46,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     private readonly IClock _clock;
 
     private UserPreferences _preferences;
+    private double _textScale = 1.0;
 
     private string _taskText = string.Empty;
     private string _descriptionText = string.Empty;
@@ -181,17 +182,50 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     };
 
     /// <summary>
-    /// The card's height for the chosen preset, never below <see cref="MinimumContentHeight"/>. A preset is a
-    /// preference; fitting its own controls is not optional.
+    /// The card's height for the chosen preset, never below the content minimum for the current text scaling.
+    /// A preset is a preference; fitting its own controls is not optional.
     /// </summary>
-    public int WidgetHeight => Math.Max(
-        _preferences.WidgetSize switch
+    public int WidgetHeight => Math.Max(PresetHeight, MinimumContentHeightFor(_textScale));
+
+    /// <summary>
+    /// Text scaling in force, where 1.0 means 100%.
+    ///
+    /// Read from the platform by the window and set here as a plain number, deliberately: a view model that
+    /// referenced a WinUI type would no longer be testable without a UI thread, which is where this project
+    /// catches its real bugs.
+    /// </summary>
+    public double TextScale
+    {
+        get => _textScale;
+        set
         {
-            WidgetSizePreset.Compact => 300,
-            WidgetSizePreset.Expanded => 560,
-            _ => 430,
-        },
-        MinimumContentHeight);
+            _textScale = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WidgetHeight));
+        }
+    }
+
+    /// <summary>
+    /// The content minimum for a given text scaling.
+    ///
+    /// Measured, not assumed: Compact at 380x300 rendered its full control set at 100% and clipped the button
+    /// row clean off the card at 150%, with the controls still measuring and still reporting <c>Visible</c>. A
+    /// fixed 300 therefore cannot be right for every scaling.
+    ///
+    /// Scaling is linear and deliberately conservative, because part of the height is chrome that does not grow:
+    /// this asks for slightly more room than strictly needed. Too tall is a cosmetic complaint; too short hides
+    /// the controls.
+    /// </summary>
+    public static int MinimumContentHeightFor(double textScale) =>
+        textScale <= 1.0 ? MinimumContentHeight : (int)Math.Ceiling(MinimumContentHeight * textScale);
+
+    /// <summary>The preset's own height, before the content minimum has its say.</summary>
+    private int PresetHeight => _preferences.WidgetSize switch
+    {
+        WidgetSizePreset.Compact => 300,
+        WidgetSizePreset.Expanded => 560,
+        _ => 430,
+    };
 
     /// <summary>Whether the widget asks to stay above other windows (default true in the first-run preferences).</summary>
     public bool AlwaysOnTop => _preferences.AlwaysOnTop;
@@ -333,6 +367,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(TimerTooltip));
         OnPropertyChanged(nameof(WidgetWidth));
         OnPropertyChanged(nameof(WidgetHeight));
+        OnPropertyChanged(nameof(TextScale));
         OnPropertyChanged(nameof(AlwaysOnTop));
 
         (StopCommand as RelayCommand)?.RaiseCanExecuteChanged();
