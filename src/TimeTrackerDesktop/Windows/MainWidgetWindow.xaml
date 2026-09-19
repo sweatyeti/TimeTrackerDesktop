@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="TimeTrackerDesktop.Windows.MainWidgetWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="TimeTrackerDesktop">
+
+    <!-- The widget host (plan Task 4.1). It opens on the session chooser and only shows the widget once a
+         session is chosen; the widget itself is Task 4.2. The Background is required, not decorative: a
+         borderless surface with no background does not hit-test, and the window becomes immovable. -->
+    <Grid x:Name="DragSurface" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Frame x:Name="Host" Grid.Row="0" />
+
+        <TextBlock
+            x:Name="StatusText"
+            Grid.Row="1"
+            Padding="16,4,16,8"
+            Opacity="0.7"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            TextWrapping="Wrap" />
+    </Grid>
+</Window>
