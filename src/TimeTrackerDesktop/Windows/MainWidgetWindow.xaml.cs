@@ -74,8 +74,50 @@ public sealed partial class MainWidgetWindow : Window
 
         page.SessionChosen += (_, session) => SessionChosen?.Invoke(this, session);
 
+        // AppWindow.Resize, not SetWindowPos: a raw SetWindowPos changes the HWND but WinUI keeps its own
+        // notion of the size, so AppWindow reported 420x260 while the window was still 620 tall and the
+        // content stayed measured against the real one - which clipped the widget's button row. Measured.
+        AppWindow.Resize(ChooserSize);
         Host.Content = page;
-        _interop.SetSize(this, ChooserSize.Width, ChooserSize.Height);
+
+        WriteGeometryDiagnostic("immediately after ShowChooser");
+
+        // and again once the layout has settled: if WinUI applies its own size on a later pass, the two lines
+        // will disagree, which is the whole question
+        DispatcherTimer probe = new() { Interval = TimeSpan.FromSeconds(3) };
+        probe.Tick += (_, _) =>
+        {
+            probe.Stop();
+            WriteGeometryDiagnostic("3s after ShowChooser");
+        };
+        probe.Start();
+    }
+
+    /// <summary>
+    /// Writes the window's geometry to a file so it can be inspected from outside the session.
+    ///
+    /// Necessary because PowerShell over SSH runs in session 0 and reports <c>MainWindowHandle = 0</c> for a
+    /// window in session 1, so every geometry check from outside is blind. A diagnostic must come from in here.
+    /// </summary>
+    public void WriteGeometryDiagnostic(string stage)
+    {
+        try
+        {
+            string line =
+                $"{DateTimeOffset.Now:HH:mm:ss.fff} | {stage} | "
+                + $"position=({AppWindow.Position.X},{AppWindow.Position.Y}) "
+                + $"size=({AppWindow.Size.Width}x{AppWindow.Size.Height}) "
+                + $"host=({Host.ActualWidth}x{Host.ActualHeight}) "
+                + $"surface=({DragSurface.ActualWidth}x{DragSurface.ActualHeight})";
+
+            File.AppendAllText(
+                Path.Combine(Path.GetTempPath(), "ttd-window.txt"),
+                line + Environment.NewLine);
+        }
+        catch(IOException)
+        {
+            // a diagnostic must never be the reason the app fails
+        }
     }
 
     /// <summary>
@@ -91,8 +133,16 @@ public sealed partial class MainWidgetWindow : Window
 
         WidgetShell shell = new(new WidgetViewModel(session, clock));
 
+        AppWindow.Resize(WidgetSize);
+
+        // The window resize does not re-measure an already-laid-out content root: the frame stayed 444x575
+        // inside a 420x260 window, which clipped the widget's button row. Sizing the root explicitly is what
+        // makes the card fill the window. Measured, with both AppWindow.Resize and SetWindowPos.
+        DragSurface.Width = WidgetSize.Width;
+        DragSurface.Height = WidgetSize.Height;
+
         Host.Content = shell;
-        _interop.SetSize(this, WidgetSize.Width, WidgetSize.Height);
+        WriteGeometryDiagnostic("after ShowWidget");
 
         if(_tickTimer is null)
         {

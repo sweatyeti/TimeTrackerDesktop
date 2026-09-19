@@ -38,13 +38,6 @@ public interface IWindowInteropService
     /// <summary>Reads the cursor's absolute screen position.</summary>
     void GetCursorPosition(out int x, out int y);
 
-    /// <summary>
-    /// Sizes the window, keeping its position. Uses <c>SetWindowPos</c> rather than the presenter, because a
-    /// borderless presenter has no resize frame and <c>AppWindow.Resize</c> did not take effect on this window
-    /// — measured: the chooser's buttons stayed clipped off the bottom.
-    /// </summary>
-    void SetSize(Window window, int width, int height);
-
     /// <summary>Applies the Windows 11 corner preference.</summary>
     void SetRoundedCorners(Window window, bool rounded);
 
@@ -216,20 +209,6 @@ public sealed class WindowInteropService : IWindowInteropService
 
         x = point.X;
         y = point.Y;
-    }
-
-    public void SetSize(Window window, int width, int height)
-    {
-        ArgumentNullException.ThrowIfNull(window);
-
-        _ = SetWindowPos(
-            HandleOf(window),
-            0,
-            0,
-            0,
-            width,
-            height,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     public void SetRoundedCorners(Window window, bool rounded)

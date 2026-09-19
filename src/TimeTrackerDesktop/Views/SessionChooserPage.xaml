@@ -9,14 +9,10 @@
          action and needs no name, so it is the accented button; Resume is only available once a row is
          selected, which is what makes the disabled state meaningful rather than decorative.
 
-         The explicit size is load-bearing: WinUI sizes a window from its content's desired size, and without
-         it the window opened short enough to clip the action buttons off the bottom. Measured on Windows 11 -
-         the button text was absent from a screenshot of the running app. -->
-    <Grid
-        Width="460"
-        Height="620"
-        Padding="16"
-        RowSpacing="12">
+         No explicit size here, deliberately: the window's size is set through the interop service, and a
+         Height on this root made the page taller than its host, which clipped the action row off the bottom
+         entirely. Measured - the window reported 460x620 while only the heading rendered. -->
+    <Grid Padding="16" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
