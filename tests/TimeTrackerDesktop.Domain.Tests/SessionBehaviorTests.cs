@@ -845,4 +845,137 @@ public sealed class SessionBehaviorTests
 
         Assert.Empty(offenders);
     }
+
+    // ------------------------------------------------------------------
+    // Task 1.5 - resume normalization and chooser metadata
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Resuming_a_session_with_no_unfinished_entry_leaves_it_idle()
+    {
+        SessionState state = StateWith(Entry(1, "weeding", complete: true));
+
+        SessionResumeResult result = SessionResumeService.Resume(state, new FakeClock(Noon));
+
+        Assert.True(result.Resumed);
+        Assert.False(result.Session!.State.IsActive);
+
+        // resuming must not mint an entry: a finished session opens idle until the user starts work
+        Assert.Single(result.Session.State.Entries);
+        Assert.Null(result.Session.State.ActiveEntry);
+    }
+
+    [Fact]
+    public void Resuming_an_unfinished_session_keeps_the_running_entry_and_its_start_time()
+    {
+        SessionState state = StateWith(Entry(1, "weeding"), Entry(2, "reading", complete: true));
+        FakeClock clock = new(Noon.AddHours(2));
+
+        SessionResumeResult result = SessionResumeService.Resume(state, clock);
+
+        Assert.True(result.Resumed);
+        Assert.True(result.Session!.State.IsActive);
+
+        // the original stamp IS the data: resuming must never restamp it to "now"
+        Assert.Equal(Noon, result.Session.State.ActiveEntry!.StartTime);
+        Assert.Equal(Noon.AddHours(2), clock.Now);
+    }
+
+    [Fact]
+    public void A_resumed_session_mints_ids_past_the_highest_stored_id()
+    {
+        // v1's hard delete left real gaps, so max+1 - never the entry count - is the safe next id
+        SessionState state = StateWith(
+            Entry(1, "weeding", complete: true),
+            Entry(7, "reading", complete: true, deleted: true));
+
+        SessionResumeResult result = SessionResumeService.Resume(state, new FakeClock(Noon));
+
+        Assert.Equal(8, result.Session!.State.NextEntryId);
+    }
+
+    [Fact]
+    public void A_corrupt_session_with_two_unfinished_entries_is_refused_not_repaired()
+    {
+        // plan Q3: refuse it, name the entries, and do not silently pick one
+        SessionState state = StateWith(Entry(1, "weeding"), Entry(2, "reading"));
+
+        SessionResumeResult result = SessionResumeService.Resume(state, new FakeClock(Noon));
+
+        Assert.False(result.Resumed);
+        Assert.Equal(SessionResumeOutcome.CorruptMultipleUnfinishedEntries, result.Outcome);
+        Assert.Equal([1, 2], result.UnfinishedEntryIds);
+
+        // no session comes back at all, so nothing can be opened read-only, repaired or exported
+        Assert.Null(result.Session);
+        Assert.NotEmpty(result.Reason);
+    }
+
+    [Fact]
+    public void A_deleted_unfinished_entry_does_not_make_a_session_corrupt()
+    {
+        // active state is derived from non-deleted incomplete entries, so a deleted stub cannot block a load
+        SessionState state = StateWith(Entry(1, "weeding"), Entry(2, "reading", deleted: true));
+
+        SessionResumeResult result = SessionResumeService.Resume(state, new FakeClock(Noon));
+
+        Assert.True(result.Resumed);
+        Assert.Equal(1, result.Session!.State.ActiveEntry!.Id);
+    }
+
+    [Fact]
+    public void Chooser_metadata_carries_name_start_time_state_and_tracked_time()
+    {
+        SessionState state = StateWith(
+            Entry(1, "weeding", complete: true),
+            Entry(2, "none", complete: true));
+
+        SessionListItem item = SessionListProjection.From(state);
+
+        Assert.Equal("fixture", item.Name);
+        Assert.Equal(Noon, item.StartedAt);
+        Assert.True(item.IsUnfinished);
+        Assert.False(item.IsActive);
+
+        // tracked time is the session's own total, so untracked ("none") time counts here - unlike the
+        // summary's named totals, which exist to answer a different question
+        Assert.Equal(TimeSpan.FromMinutes(2), item.Tracked);
+    }
+
+    [Fact]
+    public void Chooser_tracked_time_excludes_the_running_entry_and_deleted_work()
+    {
+        SessionState state = StateWith(
+            Entry(1, "weeding", complete: true),
+            Entry(2, "reading", complete: true, deleted: true),
+            Entry(3, "reading"));
+
+        SessionListItem item = SessionListProjection.From(state);
+
+        Assert.Equal(TimeSpan.FromMinutes(1), item.Tracked);
+        Assert.True(item.IsActive);
+    }
+
+    [Fact]
+    public void Chooser_rows_are_newest_first_with_a_deterministic_tie_break()
+    {
+        SessionState oldest = SessionState.New("oldest", Noon);
+        SessionState middle = SessionState.New("middle", Noon.AddHours(1));
+        SessionState newest = SessionState.New("newest", Noon.AddHours(2));
+        SessionState tied = SessionState.New("tied", Noon.AddHours(1));
+
+        IReadOnlyList<SessionListItem> items =
+            SessionListProjection.NewestFirst([middle, oldest, newest, tied]);
+
+        // the tie is broken by name, so the order does not depend on the order files were listed in
+        Assert.Equal(["newest", "middle", "tied", "oldest"], items.Select(item => item.Name));
+    }
+
+    [Fact]
+    public void Chooser_falls_back_to_a_readable_name_for_an_unnamed_session()
+    {
+        SessionState state = SessionState.New("placeholder", Noon) with { Name = "   " };
+
+        Assert.Equal("Unnamed session", SessionListProjection.From(state).Name);
+    }
 }
