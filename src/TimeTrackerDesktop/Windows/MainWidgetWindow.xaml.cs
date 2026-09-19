@@ -19,6 +19,7 @@ public sealed partial class MainWidgetWindow : Window
     private readonly IWindowInteropService _interop;
 
     private bool _dragging;
+    private DispatcherTimer? _tickTimer;
     private int _dragStartCursorX;
     private int _dragStartCursorY;
     private int _dragStartWindowX;
@@ -57,7 +58,7 @@ public sealed partial class MainWidgetWindow : Window
     /// <summary>Raised once the user has chosen a session in the chooser.</summary>
     public event EventHandler<SessionService>? SessionChosen;
 
-    /// <summary>Shows the session chooser. The widget surface is Task 4.2.</summary>
+    /// <summary>Shows the session chooser. The widget surface replaces it once a session is chosen.</summary>
     public void ShowChooser(SessionChooserViewModel viewModel)
     {
         SessionChooserPage page = new(viewModel);
@@ -65,6 +66,29 @@ public sealed partial class MainWidgetWindow : Window
         page.SessionChosen += (_, session) => SessionChosen?.Invoke(this, session);
 
         Host.Content = page;
+    }
+
+    /// <summary>
+    /// Shows the widget for a chosen session (plan Task 4.2).
+    ///
+    /// The timer only refreshes the duration text: the elapsed time is always derived from the entry's
+    /// persisted start, so a missed tick, a suspended process or a hidden window cannot make it wrong.
+    /// </summary>
+    public void ShowWidget(SessionService session, IClock clock)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        WidgetShell shell = new(new WidgetViewModel(session, clock));
+
+        Host.Content = shell;
+
+        if(_tickTimer is null)
+        {
+            _tickTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _tickTimer.Tick += (_, _) => (Host.Content as WidgetShell)?.ViewModel.Tick();
+            _tickTimer.Start();
+        }
     }
 
     /// <summary>Shows and focuses the window, for the tray and single-instance paths.</summary>

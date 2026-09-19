@@ -38,13 +38,7 @@ public sealed record SessionChoice(SessionListItem Row, SessionState State)
     public string Description => $"{StartedDisplay} · {StateLabel} · {TrackedDisplay}";
 
     /// <summary>Tracked time, rounded up to the minute the way the summary rounds.</summary>
-    public static string FormatTracked(TimeSpan tracked)
-    {
-        int minutes = (int)Math.Ceiling(tracked.TotalMinutes);
-        int hours = minutes / 60;
-
-        return hours > 0 ? $"{hours}h {minutes % 60:00}m" : $"{minutes}m";
-    }
+    public static string FormatTracked(TimeSpan tracked) => TimeDisplay.Format(tracked);
 }
 
 /// <summary>
