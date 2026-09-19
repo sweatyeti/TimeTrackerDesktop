@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using TimeTrackerDesktop.Domain;
+using TimeTrackerDesktop.Persistence;
 
 namespace TimeTrackerDesktop.Persistence.Tests;
 
@@ -32,6 +34,15 @@ public sealed class JsonCompatibilityTests
     private static string FixturesDirectory => Path.Combine(AppContext.BaseDirectory, "fixtures");
 
     private static string FixturePath(string fileName) => Path.Combine(FixturesDirectory, fileName);
+
+    /// <summary>
+    /// TTC's indentation newlines come from the platform: System.Text.Json's writer defaults to
+    /// <c>Environment.NewLine</c>, so a session file emitted on Linux uses LF and one emitted on Windows
+    /// uses CRLF. The fixtures were emitted on Linux, and the Windows build writes CRLF, so a raw byte
+    /// comparison would be testing the operating system rather than the format. Compare content, not the
+    /// convention.
+    /// </summary>
+    private static string NormalizeNewLines(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     /// <summary>Reads a fixture, returning BOTH the raw text and the typed projection.</summary>
     private static (string RawJson, SessionSnapshotDto Snapshot) Load(string fileName)
@@ -295,6 +306,323 @@ public sealed class JsonCompatibilityTests
 
         Assert.False(string.IsNullOrWhiteSpace(raw));
         Assert.StartsWith("{", raw.TrimStart(), StringComparison.Ordinal);
+    }
+
+    // --------------------------------------------------------------------- Task 2.1: the serializer
+
+    /// <summary>Every fixture TTC itself emitted as v2, i.e. everything except the v1 capture.</summary>
+    public static TheoryData<string> V2Fixtures()
+    {
+        TheoryData<string> data = new();
+
+        foreach(string file in Directory.EnumerateFiles(FixturesDirectory, "*.json", SearchOption.AllDirectories))
+        {
+            if(File.ReadAllText(file).Contains("\"schemaVersion\": 2", StringComparison.Ordinal))
+            {
+                data.Add(Path.GetFileName(file));
+            }
+        }
+
+        Assert.NotEmpty(data);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(V2Fixtures))]
+    public void V2_fixtures_reproduce_ttcs_exact_bytes(string fileName)
+    {
+        // The strongest claim available, and the reason the fixtures are kept as raw text: our writer's
+        // settings, key order and escaping agree with TTC's own serializer byte for byte - including the
+        // \uXXXX escapes and the trimmed fractional seconds.
+        string raw = File.ReadAllText(FixturePath(fileName));
+
+        Assert.Equal(NormalizeNewLines(raw), NormalizeNewLines(TtcJsonSerializer.Write(TtcJsonSerializer.Read(raw))));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllFixtures))]
+    public void Every_fixture_round_trips_without_losing_data(string fileName)
+    {
+        string raw = File.ReadAllText(FixturePath(fileName));
+
+        SessionDocument first = TtcJsonSerializer.Read(raw);
+        SessionDocument second = TtcJsonSerializer.Read(TtcJsonSerializer.Write(first));
+
+        // writing always upgrades to v2 - the one intended difference between the two readings
+        Assert.Equal(SessionDocument.CurrentSchemaVersion, second.SchemaVersion);
+        Assert.Equal(first.SessionId, second.SessionId);
+        Assert.Equal(first.Name, second.Name);
+        Assert.Equal(first.StartedAt, second.StartedAt);
+        Assert.Equal(first.EndedAt, second.EndedAt);
+        Assert.Equal(first.ToSessionState().Entries, second.ToSessionState().Entries);
+    }
+
+    [Fact]
+    public void V1_fixture_upgrades_to_v2_and_defaults_isDeleted_to_false()
+    {
+        SessionDocument document = TtcJsonSerializer.Read(File.ReadAllText(FixturePath("session-v1-completed.json")));
+
+        Assert.Equal(1, document.SchemaVersion);
+
+        string rewritten = TtcJsonSerializer.Write(document);
+
+        Assert.Contains("\"schemaVersion\": 2", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"isDeleted\": false", rewritten, StringComparison.Ordinal);
+        Assert.All(document.ToSessionState().Entries, entry => Assert.False(entry.IsDeleted));
+    }
+
+    [Fact]
+    public void Unfinished_fields_stay_null_rather_than_being_invented()
+    {
+        SessionDocument document = TtcJsonSerializer.Read(File.ReadAllText(FixturePath("session-v2-unfinished.json")));
+
+        Assert.Null(document.EndedAt);
+
+        SessionState state = document.ToSessionState();
+        TimeEntry open = Assert.Single(state.Entries, entry => !entry.IsComplete);
+
+        Assert.Null(open.EndTime);
+        Assert.Null(open.Duration);
+        Assert.True(state.IsActive);
+    }
+
+    [Fact]
+    public void Hostile_and_unicode_task_text_survives_a_round_trip_unescaped()
+    {
+        // the fixture stores this text as \uXXXX escapes, so the VALUE must come back as real characters
+        string raw = File.ReadAllText(FixturePath("hostile-task-names.json"));
+        SessionDocument document = TtcJsonSerializer.Read(raw);
+
+        Assert.Contains(document.ToSessionState().Entries, entry => entry.Task.Contains('é', StringComparison.Ordinal));
+        Assert.Contains(document.ToSessionState().Entries, entry => entry.Task.Contains(@"..\..\", StringComparison.Ordinal));
+
+        // ...and writing it again re-escapes it exactly the way TTC did
+        Assert.Equal(NormalizeNewLines(raw), NormalizeNewLines(TtcJsonSerializer.Write(document)));
+    }
+
+    [Fact]
+    public void Editing_a_known_field_keeps_an_injected_unknown_property()
+    {
+        // the plan's case: import, edit a known field, export - and the fields we do not understand
+        // must still be there afterwards
+        const string Raw = """
+            {
+              "schemaVersion": 2,
+              "sessionId": "0b3f2f7c-6f4f-4f6e-9a1b-2c3d4e5f6a7b",
+              "name": "injected",
+              "startedAt": "2026-09-18T10:00:00-05:00",
+              "endedAt": null,
+              "futureEnvelopeField": { "nested": [1, 2] },
+              "entries": [
+                {
+                  "id": 1,
+                  "startTime": "2026-09-18T10:00:00-05:00",
+                  "endTime": null,
+                  "task": "weeding",
+                  "description": "",
+                  "logged": false,
+                  "isComplete": false,
+                  "isDeleted": false,
+                  "futureEntryField": "keep me"
+                }
+              ]
+            }
+            """;
+
+        SessionDocument document = TtcJsonSerializer.Read(Raw);
+
+        Assert.True(document.UnknownFields.ContainsKey("futureEnvelopeField"));
+        Assert.True(document.Entries[0].UnknownFields.ContainsKey("futureEntryField"));
+
+        SessionState state = document.ToSessionState();
+
+        SessionState edited = state with
+        {
+            Name = "renamed",
+            Entries = [state.Entries[0] with { Task = "reading" }],
+        };
+
+        string rewritten = TtcJsonSerializer.Write(SessionDocument.FromSessionState(edited, document));
+
+        Assert.Contains("\"futureEnvelopeField\"", rewritten, StringComparison.Ordinal);
+        Assert.Contains("keep me", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"name\": \"renamed\"", rewritten, StringComparison.Ordinal);
+        Assert.Contains("\"task\": \"reading\"", rewritten, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_retained_field_cannot_override_a_known_one_when_written()
+    {
+        // "Unknown fields must never override required known fields when written": a retained set that
+        // claims to know better than the document must lose, every time
+        SessionDocument document = new(
+            SchemaVersion: 99,
+            SessionId: Guid.Parse("0b3f2f7c-6f4f-4f6e-9a1b-2c3d4e5f6a7b"),
+            Name: "ours",
+            StartedAt: DateTimeOffset.Parse("2026-09-18T10:00:00-05:00", CultureInfo.InvariantCulture),
+            EndedAt: null,
+            Entries: [],
+            UnknownFields: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["name"] = JsonDocument.Parse("\"theirs\"").RootElement.Clone(),
+                ["schemaVersion"] = JsonDocument.Parse("99").RootElement.Clone(),
+                ["endedAt"] = JsonDocument.Parse("\"2020-01-01T00:00:00-06:00\"").RootElement.Clone(),
+            });
+
+        string json = TtcJsonSerializer.Write(document);
+
+        Assert.Contains("\"name\": \"ours\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"schemaVersion\": 2", json, StringComparison.Ordinal);
+        Assert.Contains("\"endedAt\": null", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("theirs", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("99", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("2020-01-01", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IsValid_is_never_written_and_is_not_retained_as_an_unknown_field()
+    {
+        string raw = File.ReadAllText(FixturePath("session-v2-completed.json"))
+            .Replace("\"isComplete\": true,", "\"isComplete\": true,\n      \"isValid\": true,", StringComparison.Ordinal);
+
+        SessionDocument document = TtcJsonSerializer.Read(raw);
+
+        Assert.False(document.Entries[0].UnknownFields.ContainsKey("isValid"));
+        Assert.DoesNotContain("isValid", TtcJsonSerializer.Write(document), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_schema_version_outside_the_supported_range_is_refused_with_a_reason()
+    {
+        string v2 = File.ReadAllText(FixturePath("session-v2-completed.json"));
+
+        string future = v2.Replace("\"schemaVersion\": 2", "\"schemaVersion\": 3", StringComparison.Ordinal);
+        string absent = v2.Replace("\"schemaVersion\": 2,", string.Empty, StringComparison.Ordinal);
+
+        Assert.False(TtcJsonSerializer.TryRead(future, out SessionDocument? futureDocument, out string? futureReason));
+        Assert.Null(futureDocument);
+        Assert.Contains("3", futureReason, StringComparison.Ordinal);
+
+        // a missing key reads as 0, which is "absent or unsupported-old", not "version 0 is fine"
+        Assert.False(TtcJsonSerializer.TryRead(absent, out SessionDocument? absentDocument, out string? absentReason));
+        Assert.Null(absentDocument);
+        Assert.Contains("schemaVersion", absentReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Malformed_json_is_refused_with_a_diagnostic_rather_than_a_crash()
+    {
+        Assert.False(TtcJsonSerializer.TryRead("{ not json", out SessionDocument? document, out string? reason));
+        Assert.Null(document);
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+
+        Assert.ThrowsAny<JsonException>(() => TtcJsonSerializer.Read("{ not json"));
+    }
+
+    [Fact]
+    public void A_non_guid_session_id_makes_the_file_unreadable()
+    {
+        string raw = File.ReadAllText(FixturePath("session-v2-completed.json"))
+            .Replace("490df8b1-4e72-4980-9769-d215867bea3e", "not-a-guid", StringComparison.Ordinal);
+
+        Assert.False(TtcJsonSerializer.TryRead(raw, out SessionDocument? document, out string? reason));
+        Assert.Null(document);
+        Assert.Contains("sessionId", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Absent_and_null_entry_fields_are_repaired_the_way_ttc_repairs_them()
+    {
+        const string Raw = """
+            {
+              "schemaVersion": 2,
+              "sessionId": "0b3f2f7c-6f4f-4f6e-9a1b-2c3d4e5f6a7b",
+              "name": "   ",
+              "startedAt": "2026-09-18T10:00:00-05:00",
+              "endedAt": null,
+              "entries": [
+                { "id": 1, "startTime": "2026-09-18T10:00:00-05:00", "endTime": null, "task": null, "description": null, "logged": false, "isComplete": true, "isDeleted": false },
+                null
+              ]
+            }
+            """;
+
+        SessionDocument document = TtcJsonSerializer.Read(Raw);
+        SessionState state = document.ToSessionState();
+
+        // the null element is dropped, not carried as a hole
+        TimeEntry entry = Assert.Single(state.Entries);
+
+        // task is the one field TTC invents a value for, because "none" is what the app itself stores
+        Assert.Equal(TimeEntry.NoTask, entry.Task);
+        Assert.Equal(string.Empty, entry.Description);
+
+        // a whitespace-only name is repaired in the DOMAIN view, while the raw text stays in the document
+        Assert.Equal("Unnamed session", state.Name);
+        Assert.Equal("   ", document.Name);
+    }
+
+    [Fact]
+    public void Duplicate_ids_collapse_with_the_last_occurrence_winning()
+    {
+        const string Raw = """
+            {
+              "schemaVersion": 2,
+              "sessionId": "0b3f2f7c-6f4f-4f6e-9a1b-2c3d4e5f6a7b",
+              "name": "dupes",
+              "startedAt": "2026-09-18T10:00:00-05:00",
+              "endedAt": null,
+              "entries": [
+                { "id": 1, "startTime": "2026-09-18T10:00:00-05:00", "endTime": null, "task": "first", "description": "", "logged": false, "isComplete": false, "isDeleted": false },
+                { "id": 1, "startTime": "2026-09-18T11:00:00-05:00", "endTime": null, "task": "second", "description": "", "logged": false, "isComplete": false, "isDeleted": false }
+              ]
+            }
+            """;
+
+        SessionState state = TtcJsonSerializer.Read(Raw).ToSessionState();
+
+        TimeEntry entry = Assert.Single(state.Entries);
+
+        // a keyed reader and a positional reader must not be able to disagree about id 1
+        Assert.Equal("second", entry.Task);
+        Assert.Equal(DateTimeOffset.Parse("2026-09-18T11:00:00-05:00", CultureInfo.InvariantCulture), entry.StartTime);
+    }
+
+    [Fact]
+    public void Entries_are_written_ascending_by_id_even_when_the_state_is_not()
+    {
+        SessionState state = SessionState.New("ordering", DateTimeOffset.Parse("2026-09-18T10:00:00-05:00", CultureInfo.InvariantCulture)) with
+        {
+            Entries =
+            [
+                new TimeEntry(9, DateTimeOffset.Parse("2026-09-18T12:00:00-05:00", CultureInfo.InvariantCulture), null, "third", string.Empty, false, false, false),
+                new TimeEntry(1, DateTimeOffset.Parse("2026-09-18T10:00:00-05:00", CultureInfo.InvariantCulture), null, "first", string.Empty, false, false, false),
+            ],
+        };
+
+        string json = TtcJsonSerializer.Write(SessionDocument.FromSessionState(state));
+
+        Assert.True(
+            json.IndexOf("\"id\": 1", StringComparison.Ordinal) < json.IndexOf("\"id\": 9", StringComparison.Ordinal),
+            json);
+    }
+
+    [Fact]
+    public void An_open_entry_is_written_with_a_null_end_time()
+    {
+        // an open entry must never carry a stale end time, even if the in-memory value holds one
+        SessionState state = SessionState.New("open", DateTimeOffset.Parse("2026-09-18T10:00:00-05:00", CultureInfo.InvariantCulture)) with
+        {
+            Entries =
+            [
+                new TimeEntry(1, DateTimeOffset.Parse("2026-09-18T10:00:00-05:00", CultureInfo.InvariantCulture), DateTimeOffset.Parse("2026-09-18T11:00:00-05:00", CultureInfo.InvariantCulture), "weeding", string.Empty, false, IsComplete: false, IsDeleted: false),
+            ],
+        };
+
+        string json = TtcJsonSerializer.Write(SessionDocument.FromSessionState(state));
+
+        Assert.Contains("\"endTime\": null", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("2026-09-18T11:00:00", json, StringComparison.Ordinal);
     }
 }
 

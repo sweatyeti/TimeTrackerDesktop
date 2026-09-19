@@ -44,6 +44,24 @@ The encoder is the detail most likely to be got wrong. A real emitted file conta
 literal characters. Hex digits are upper-case. A reader that assumes plain UTF-8 text in the file, or
 a writer that emits raw UTF-8, produces a file TTC and we would disagree about.
 
+**Timestamps are the exception, and it bites.** System.Text.Json's `DateTime`/`DateTimeOffset` writers
+do **not** run the value through the encoder — ISO 8601 text contains nothing that needs escaping — so
+an offset of `+00:00` stays a **literal plus**. The default encoder *does* escape a plus sign, so a
+writer that builds the JSON as a tree of string values emits an escaped offset instead and stops
+matching TTC byte for byte. Write timestamps with `Utf8JsonWriter.WriteString(name, DateTimeOffset)`
+(or an equivalent typed path), never by hand-building the string. The fixtures caught exactly this.
+
+Two more wire details the same fixtures pin:
+
+- Fractional seconds are **trimmed**, not padded: a value with seven digits is written with seven only
+  when the last is significant (`.189536` rather than `.1895360`), and a hand-authored `.1` stays `.1`.
+- The file has **no trailing newline**; it ends with `}`.
+- Indentation newlines follow the **platform**: System.Text.Json's writer defaults to
+  `Environment.NewLine`, so a Linux emission uses LF and a Windows one uses CRLF. TTC inherits exactly the
+  same behaviour, so this is parity rather than a choice — and it is why the byte-level round-trip test
+  compares content with newlines normalised rather than raw bytes. The committed fixtures were emitted on
+  Linux.
+
 ## Top-level schema
 
 | Field | Type | Nullable | Notes |
@@ -195,16 +213,27 @@ must remain readable by `main`, which it will be as long as it is v2 with camelC
 
 ### Unknown fields
 
-The fixtures are kept as raw text so tests can assert on the wire format, and so a future unknown-field
-check has something to read. `Fixture_field_names_match_the_documented_schema` is a **drift canary**: it
+The fixtures are kept as raw text so tests can assert on the wire format, and so the unknown-field
+checks have something to read. `Fixture_field_names_match_the_documented_schema` is a **drift canary**: it
 fails if TTC adds, removes or renames a field, forcing this document and the affected reader to be
-updated deliberately rather than silently. TimeTrackerDesktop should preserve fields it does not
-understand when rewriting a file, so an older build and a newer one can share a session directory.
+updated deliberately rather than silently. TimeTrackerDesktop preserves fields it does not understand
+when rewriting a file, so an older build and a newer one can share a session directory.
+
+**Implemented (Task 2.1)** in `TtcJsonSerializer` + `SessionDocument`:
+
+- Reading keeps every unrecognised envelope and entry field, in `SessionDocument.UnknownFields` and
+  `EntryDocument.UnknownFields`. Retained entry fields are re-attached **by id**, because ids are keys
+  and survive both edits and soft deletes.
+- Writing emits the known fields first, in TTC's own key order, then the retained ones — **skipping any
+  key the format already owns**, so a file's stale copy of a field we are responsible for cannot
+  resurrect itself.
+- `isValid` is treated as a known field that is never written, so it is dropped rather than round-tripped
+  as if it were part of the format.
+- A document read and written again is **byte-identical** to TTC's original, except for the deliberate
+  `schemaVersion` upgrade on a v1 file. The compatibility tests assert this against every v2 fixture.
 
 ## Open questions
 
-- **Unknown-field retention is not yet implemented** — Task 0.3 pins the contract and the tests; the
-  reader that must honour it arrives with the persistence layer (Phase 1+).
 - **`readme` documents the schema to users.** If TTC's README and this document disagree, the emitted
   files win — they are the actual contract, and the fixtures are the evidence.
 - **`task` uniqueness is not enforced** anywhere, so grouping must tolerate several entries sharing a
